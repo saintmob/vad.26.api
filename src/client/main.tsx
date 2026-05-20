@@ -86,9 +86,9 @@ function App() {
       });
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data) as ServerMessage;
-        if (message.type === "state.snapshot" || message.type === "state.patch") setSnapshot(message.state);
-        if (message.type === "control.ack") setLastAck(`${message.command.command} accepted for ${message.command.target}`);
-        if (message.type === "error") setLastAck(message.error);
+        if (isStateMessage(message)) setSnapshot(message.state);
+        if (isControlAck(message)) setLastAck(`${message.command.command} accepted for ${message.command.target}`);
+        if (isErrorMessage(message)) setLastAck(message.error);
       });
       socket.addEventListener("close", () => {
         if (closed) return;
@@ -442,6 +442,18 @@ function Metric({ label, value, icon, wide }: { label: string; value: React.Reac
 
 function StatusPill({ status }: { status: string }) {
   return <span className={`status-pill ${status}`}>{status}</span>;
+}
+
+function isStateMessage(message: ServerMessage): message is Extract<ServerMessage, { type: "state.snapshot" | "state.patch" }> {
+  return message.type === "state.snapshot" || message.type === "state.patch";
+}
+
+function isControlAck(message: ServerMessage): message is Extract<ServerMessage, { type: "control.ack" }> {
+  return message.type === "control.ack";
+}
+
+function isErrorMessage(message: ServerMessage): message is Extract<ServerMessage, { type: "error" }> {
+  return message.type === "error";
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
