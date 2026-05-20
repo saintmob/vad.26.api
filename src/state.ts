@@ -9,18 +9,33 @@ import {
   JsonRecord,
   MODULE_NAMES,
   ModuleName,
-  PerformanceState
+  PerformanceState,
+  ScreenOwner,
+  ScreenRouteEntry,
+  ScreenRoutePreset
 } from "./types.js";
 
 const DEFAULT_BANDS = Array.from({ length: 16 }, () => 0);
 
+export const SCREEN_IDS = [
+  "A1",
+  "B1", "B2", "B3", "B4", "B5", "B6",
+  "C1", "C2", "C3", "C4",
+  "D1", "D2", "D3",
+  "E1", "F1",
+  "L1", "L2", "R1", "R2"
+] as const;
+
 const SCREEN_TOPOLOGY = [
-  ["A1", "B1", "C1", "D1", "E1", "F1"],
-  ["", "B2", "C2", "D2", "E2", ""],
-  ["", "", "C3", "D3", "", ""],
-  ["", "", "C4", "D4", "", ""],
-  ["", "", "C5", "D5", "", ""]
+  ["L1", "A1", "R1"],
+  ["L2", "B1", "B2", "B3", "B4", "B5", "B6", "R2"],
+  ["C1", "C2", "C3", "C4"],
+  ["D1", "D2", "D3"],
+  ["E1", "F1"]
 ];
+
+const VJ_SCREEN_IDS = new Set(["A1", "L1", "L2", "R1", "R2"]);
+const VJ_TAKEOVER_SCREEN_IDS = new Set(["A1", "B1", "B2", "B3", "B4", "B5", "B6", "L1", "L2", "R1", "R2"]);
 
 export function isModuleName(value: unknown): value is ModuleName {
   return typeof value === "string" && MODULE_NAMES.includes(value as ModuleName);
@@ -109,10 +124,14 @@ export function createDefaultState(now = Date.now()): PerformanceState {
 }
 
 function createDefaultInteractionModule(): InteractionModuleState {
+  const now = Date.now();
   return {
     status: "online",
     screenTopology: SCREEN_TOPOLOGY,
-    screenId: "C5",
+    screenRegistry: createDefaultScreenRegistry(),
+    screenRoutes: createScreenRoutesForPreset("balanced", now),
+    screenRoutePreset: "balanced",
+    screenId: "C2",
     role: "screen",
     overview: false,
     mode: "idle",
@@ -213,7 +232,7 @@ export function normalizeControlCommand(input: unknown): ControlCommand {
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx"].includes(command)) return "visual";
-  if (["setInteractionMode", "setMode", "setIntensity", "resetTree", "pulseScreen", "setScreen"].includes(command)) return "interaction";
+  if (["setInteractionMode", "setMode", "setIntensity", "resetTree", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset"].includes(command)) return "interaction";
   if (["play", "pause", "reset", "setBpm", "seek"].includes(command)) return "show";
   if (command === "focusVideo") return "video";
   if (command === "setGuestOnStage") return "guest";
@@ -258,6 +277,16 @@ export class ShowStateStore {
     }
     if (moduleName === "interaction") {
       this.state.modules.interaction.screenTopology = normalizeScreenTopology(this.state.modules.interaction.screenTopology);
+      this.state.modules.interaction.screenRegistry = normalizeScreenRegistry(this.state.modules.interaction.screenRegistry);
+      const patchedPreset = normalizeScreenRoutePreset(patch.screenRoutePreset);
+      if (patchedPreset) {
+        this.state.modules.interaction.screenRoutePreset = patchedPreset;
+        this.state.modules.interaction.screenRoutes = createScreenRoutesForPreset(patchedPreset, Date.now());
+      }
+      this.state.modules.interaction.screenRoutes = normalizeScreenRoutes(
+        this.state.modules.interaction.screenRoutes,
+        this.state.modules.interaction.screenRoutePreset
+      );
     }
     this.touch();
     if (moduleName !== "audio") {
@@ -417,6 +446,21 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.modules.interaction.screenId = String(value || command.target);
       state.modules.interaction.role = state.modules.interaction.screenId === "MASTER" ? "master" : "screen";
     }
+    if (command.command === "setScreenOwner") {
+      const screenId = String(command.target || "");
+      const owner = normalizeScreenOwner(value);
+      if (SCREEN_IDS.includes(screenId as (typeof SCREEN_IDS)[number]) && owner) {
+        state.modules.interaction.screenRoutes[screenId] = makeScreenRoute(screenId, owner, Date.now(), "control");
+        state.modules.interaction.screenRoutePreset = "balanced";
+      }
+    }
+    if (command.command === "setScreenRoutePreset") {
+      const preset = normalizeScreenRoutePreset(value || command.target);
+      if (preset) {
+        state.modules.interaction.screenRoutePreset = preset;
+        state.modules.interaction.screenRoutes = createScreenRoutesForPreset(preset, Date.now());
+      }
+    }
   }
 
   if (command.module === "guest" && command.command === "setGuestOnStage") {
@@ -431,7 +475,98 @@ function normalizeBands(value: unknown) {
 
 function normalizePerformanceState(state: PerformanceState): PerformanceState {
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
+  state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
+  state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
+  state.modules.interaction.screenRoutes = normalizeScreenRoutes(
+    state.modules.interaction.screenRoutes,
+    state.modules.interaction.screenRoutePreset
+  );
   return state;
+}
+
+function createDefaultScreenRegistry() {
+  return SCREEN_IDS.map((id, index) => ({
+    id,
+    label: `Screen ${id}`,
+    enabled: true,
+    physicalIndex: index + 1
+  }));
+}
+
+function createScreenRoutesForPreset(preset: ScreenRoutePreset, now: number): Record<string, ScreenRouteEntry> {
+  const routes: Record<string, ScreenRouteEntry> = {};
+  for (const screenId of SCREEN_IDS) {
+    const owner = ownerForPreset(screenId, preset);
+    routes[screenId] = makeScreenRoute(screenId, owner, now, "preset");
+  }
+  return routes;
+}
+
+function ownerForPreset(screenId: string, preset: ScreenRoutePreset): ScreenOwner {
+  if (preset === "baofa_takeover") return "baofa";
+  if (preset === "vj_takeover") return VJ_TAKEOVER_SCREEN_IDS.has(screenId) ? "vj" : "baofa";
+  return VJ_SCREEN_IDS.has(screenId) ? "vj" : "baofa";
+}
+
+function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source?: string): ScreenRouteEntry {
+  return {
+    screenId,
+    owner,
+    url: owner === "vj"
+      ? `http://localhost:4302/screen/${encodeURIComponent(screenId)}`
+      : owner === "baofa"
+        ? `http://localhost:4303/screen/${encodeURIComponent(screenId)}`
+        : null,
+    updatedAt,
+    source
+  };
+}
+
+function normalizeScreenRegistry(value: unknown) {
+  if (!Array.isArray(value)) return createDefaultScreenRegistry();
+  const byId = new Map<string, unknown>(value.map((item) => {
+    const record = isRecord(item) ? item : {};
+    return [String(record.id || ""), record];
+  }));
+  return SCREEN_IDS.map((id, index) => {
+    const record = isRecord(byId.get(id)) ? byId.get(id) as JsonRecord : {};
+    return {
+      id,
+      label: String(record.label || `Screen ${id}`),
+      enabled: typeof record.enabled === "boolean" ? record.enabled : true,
+      physicalIndex: Math.max(1, Math.round(positiveNumber(record.physicalIndex, index + 1)))
+    };
+  });
+}
+
+function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
+  const defaults = createScreenRoutesForPreset(preset, Date.now());
+  if (!isRecord(value)) return defaults;
+
+  for (const screenId of SCREEN_IDS) {
+    const existing = value[screenId];
+    if (!isRecord(existing)) continue;
+    const owner = normalizeScreenOwner(existing.owner) || defaults[screenId].owner;
+    defaults[screenId] = {
+      ...defaults[screenId],
+      ...existing,
+      screenId,
+      owner,
+      url: typeof existing.url === "string" || existing.url === null
+        ? existing.url
+        : makeScreenRoute(screenId, owner, defaults[screenId].updatedAt).url,
+      updatedAt: positiveNumber(existing.updatedAt, defaults[screenId].updatedAt)
+    };
+  }
+  return defaults;
+}
+
+function normalizeScreenOwner(value: unknown): ScreenOwner | null {
+  return ["vj", "baofa", "off", "diagnostic"].includes(String(value)) ? String(value) as ScreenOwner : null;
+}
+
+function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
+  return ["balanced", "vj_takeover", "baofa_takeover"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
 }
 
 function normalizeScreenTopology(value: unknown): string[][] {

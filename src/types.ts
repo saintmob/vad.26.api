@@ -4,6 +4,8 @@ export type ModuleName = (typeof MODULE_NAMES)[number];
 export type ModuleStatus = "offline" | "standby" | "online" | "live" | "error";
 export type ShowStatus = "standby" | "running" | "paused" | "ended";
 export type JsonRecord = Record<string, unknown>;
+export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic";
+export type ScreenRoutePreset = "balanced" | "vj_takeover" | "baofa_takeover";
 
 export interface AudioFrame {
   type: "mixer.audioFrame";
@@ -47,6 +49,22 @@ export interface ScreenPoint {
   y: number;
   z: number;
   timestamp: number;
+}
+
+export interface ScreenRegistryEntry {
+  id: string;
+  label: string;
+  enabled: boolean;
+  physicalIndex: number;
+}
+
+export interface ScreenRouteEntry {
+  screenId: string;
+  owner: ScreenOwner;
+  url: string | null;
+  updatedAt: number;
+  status?: ModuleStatus;
+  source?: string;
 }
 
 export interface AudioModuleState {
@@ -103,6 +121,9 @@ export interface VisualModuleState {
 export interface InteractionModuleState {
   status: ModuleStatus;
   screenTopology: string[][];
+  screenRegistry: ScreenRegistryEntry[];
+  screenRoutes: Record<string, ScreenRouteEntry>;
+  screenRoutePreset: ScreenRoutePreset;
   screenId: string;
   role: "screen" | "master";
   overview: boolean;

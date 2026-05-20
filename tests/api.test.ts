@@ -31,6 +31,69 @@ test("serves API spec and initial state", async () => {
     assert.ok(state.audioSources["mic-teacher"]);
     assert.ok(state.modules.visual.scene);
     assert.ok(state.modules.interaction.screenTopology.length);
+    assert.equal(state.modules.interaction.screenRegistry.length, 20);
+    assert.equal(Object.keys(state.modules.interaction.screenRoutes).length, 20);
+    assert.equal(state.modules.interaction.screenRoutes.A1.owner, "vj");
+    assert.equal(state.modules.interaction.screenRoutes.B1.owner, "baofa");
+    assert.equal(state.modules.interaction.screenRoutes.L1.url, "http://localhost:4302/screen/L1");
+  });
+});
+
+test("updates screen route preset and individual screen owners", async () => {
+  await withServer(async (baseUrl) => {
+    const presetResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "vj_takeover",
+        command: "setScreenRoutePreset",
+        value: "vj_takeover",
+        issuedBy: "test"
+      })
+    });
+    const presetBody = await presetResponse.json();
+
+    assert.equal(presetResponse.status, 202);
+    assert.equal(presetBody.state.modules.interaction.screenRoutePreset, "vj_takeover");
+    assert.equal(presetBody.state.modules.interaction.screenRoutes.B6.owner, "vj");
+    assert.equal(presetBody.state.modules.interaction.screenRoutes.C1.owner, "baofa");
+
+    const ownerResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "C1",
+        command: "setScreenOwner",
+        value: "diagnostic",
+        issuedBy: "test"
+      })
+    });
+    const ownerBody = await ownerResponse.json();
+
+    assert.equal(ownerResponse.status, 202);
+    assert.equal(ownerBody.state.modules.interaction.screenRoutes.C1.owner, "diagnostic");
+    assert.equal(ownerBody.state.modules.interaction.screenRoutes.C1.url, null);
+  });
+});
+
+test("accepts interaction module patch for screen route preset", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: "dashboard",
+        patch: { screenRoutePreset: "baofa_takeover" }
+      })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.state.modules.interaction.screenRoutePreset, "baofa_takeover");
+    assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "baofa");
+    assert.equal(body.state.modules.interaction.screenRoutes.R2.url, "http://localhost:4303/screen/R2");
   });
 });
 
