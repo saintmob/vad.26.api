@@ -26,9 +26,12 @@ import "./styles.css";
 
 type ConnectionState = "connecting" | "connected" | "offline";
 
+const env = import.meta.env;
+const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
+
 type ServerMessage =
   | { type: "state.snapshot"; state: PerformanceState }
-  | { type: "state.patch"; state: PerformanceState; module: ModuleName; patch: Record<string, unknown> }
+  | { type: "state.patch"; state?: PerformanceState; module: ModuleName; patch: Record<string, unknown>; updatedAt?: number }
   | { type: "control.ack"; ok: boolean; command: ControlCommand }
   | { type: "client.presence"; state?: PerformanceState }
   | { type: "error"; error: string }
@@ -47,7 +50,7 @@ const audioPresets = ["Neon Loop", "Warehouse", "Dream Pop", "Break Lab", "EDM F
 function App() {
   const [snapshot, setSnapshot] = React.useState<PerformanceState | null>(null);
   const [connection, setConnection] = React.useState<ConnectionState>("connecting");
-  const [token, setToken] = React.useState(() => window.localStorage.getItem("vad-control-token") || "");
+  const [token, setToken] = React.useState(() => window.localStorage.getItem("vad-control-token") || defaultControlToken);
   const [lastAck, setLastAck] = React.useState("Waiting for control activity");
   const [manualText, setManualText] = React.useState("NEONPULSE");
   const firebaseClientRef = React.useRef<ReturnType<typeof createFirebaseDashboardClient> | null>(null);
@@ -109,7 +112,10 @@ function App() {
       });
       socket.addEventListener("message", (event) => {
         const message = JSON.parse(event.data) as ServerMessage;
-        if (isStateMessage(message)) setSnapshot(message.state);
+        if (isStateSnapshot(message)) setSnapshot(message.state);
+        if (isStatePatch(message)) {
+          setSnapshot((current) => message.state || (current ? applyStatePatch(current, message) : current));
+        }
         if (isControlAck(message)) setLastAck(`${message.command.command} accepted for ${message.command.target}`);
         if (isErrorMessage(message)) setLastAck(message.error);
       });
@@ -482,8 +488,40 @@ function StatusPill({ status }: { status: string }) {
   return <span className={`status-pill ${status}`}>{status}</span>;
 }
 
-function isStateMessage(message: ServerMessage): message is Extract<ServerMessage, { type: "state.snapshot" | "state.patch" }> {
-  return message.type === "state.snapshot" || message.type === "state.patch";
+function isStateSnapshot(message: ServerMessage): message is Extract<ServerMessage, { type: "state.snapshot" }> {
+  return message.type === "state.snapshot";
+}
+
+function isStatePatch(message: ServerMessage): message is Extract<ServerMessage, { type: "state.patch" }> {
+  return message.type === "state.patch";
+}
+
+function applyStatePatch(state: PerformanceState, message: Extract<ServerMessage, { type: "state.patch" }>): PerformanceState {
+  return {
+    ...state,
+    updatedAt: message.updatedAt || Date.now(),
+    modules: {
+      ...state.modules,
+      [message.module]: mergePatch(state.modules[message.module], message.patch)
+    }
+  };
+}
+
+function mergePatch<T>(target: T, patch: Record<string, unknown>): T {
+  if (!isPlainRecord(target)) return patch as T;
+  const next: Record<string, unknown> = { ...target };
+  for (const [key, value] of Object.entries(patch)) {
+    if (isPlainRecord(value) && isPlainRecord(next[key])) {
+      next[key] = mergePatch(next[key], value);
+    } else {
+      next[key] = value;
+    }
+  }
+  return next as T;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isControlAck(message: ServerMessage): message is Extract<ServerMessage, { type: "control.ack" }> {

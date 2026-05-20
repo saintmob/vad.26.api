@@ -20,11 +20,10 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3000` by default.
+Open `http://localhost:4300` by default.
 
 Useful environment variables:
 
-- `PORT`: HTTP/WS port. Default: `3000`.
 - `SHOW_STATE_PATH`: snapshot path. Default: `data/show-state.json`.
 - `CONTROL_TOKEN`: optional shared control token. When set, mutating REST calls and WS control/state messages must include the token.
 
@@ -91,7 +90,7 @@ If `CONTROL_TOKEN` is configured, pass it as either:
 Connect to:
 
 ```text
-ws://localhost:3000/ws
+ws://localhost:4300/ws
 ```
 
 Client-to-server messages:

@@ -17,6 +17,7 @@ import {
 import { ClientHelloMessage, JsonRecord, PerformanceState } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const SHOW_CONTROL_PORT = 4300;
 const defaultSnapshotPath = () => process.env.SHOW_STATE_PATH || path.join(process.cwd(), "data", "show-state.json");
 
 export interface CreateServerOptions {
@@ -68,6 +69,42 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     res.json(performanceSpec);
   });
 
+  app.get("/api/audio-summary", (_req, res) => {
+    const state = store.getState();
+    const activeSourceId = state.modules.audio.activeSourceId;
+    const source = state.audioSources[activeSourceId];
+
+    if (!source) {
+      res.json({
+        volume: 0, subBass: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, treble: 0,
+        energy: 0, beat: 0, spectralCentroid: 0, spectralFlux: 0, transient: 0,
+        dynamicRange: 0, syncedSignal: 0
+      });
+      return;
+    }
+
+    const bands = source.frequencyBands || Array(16).fill(0);
+    const avg = (start: number, end: number) => 
+      bands.slice(start, end + 1).reduce((a, b) => a + b, 0) / (end - start + 1);
+
+    res.json({
+      volume: source.level,
+      subBass: avg(0, 0),
+      bass: avg(1, 2),
+      lowMid: avg(3, 5),
+      mid: avg(6, 8),
+      highMid: avg(9, 11),
+      treble: avg(12, 15),
+      energy: source.rms,
+      beat: source.speaking ? 1 : 0,
+      spectralCentroid: avg(0, 15),
+      spectralFlux: source.peak,
+      transient: Math.max(0, source.peak - source.rms),
+      dynamicRange: Math.min(1, source.peak / (source.rms || 0.01)),
+      syncedSignal: source.level
+    });
+  });
+
   app.get("/api/state", (_req, res) => {
     res.json(store.getState());
   });
@@ -89,7 +126,6 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     store.applyAudioFrame(frame);
     snapshotWriter?.schedule(store.getState());
     hub.broadcast(frame);
-    broadcastSnapshot(hub, store);
     res.status(202).json({ ok: true, frame, state: store.getState() });
   });
 
@@ -106,8 +142,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     const patch = isRecord(req.body.patch) ? req.body.patch : req.body;
     store.applyModulePatch(moduleName, patch, String(req.body.source || "rest"));
     snapshotWriter?.schedule(store.getState());
-    hub.broadcast({ type: "state.patch", module: moduleName, patch, state: store.getState() });
-    broadcastSnapshot(hub, store);
+    hub.broadcast({ type: "state.patch", module: moduleName, patch, updatedAt: store.getState().updatedAt });
     res.status(202).json({ ok: true, module: moduleName, patch, state: store.getState() });
   });
 
@@ -245,7 +280,6 @@ function attachWebSocket(
         store.applyAudioFrame(frame);
         snapshotWriter?.schedule(store.getState());
         hub.broadcast(frame);
-        broadcastSnapshot(hub, store);
         return;
       }
 
@@ -254,8 +288,7 @@ function attachWebSocket(
         const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
         store.applyModulePatch(message.module, patch, String(message.source || clientId || "ws"));
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast({ type: "state.patch", module: message.module, patch, state: store.getState() });
-        broadcastSnapshot(hub, store);
+        hub.broadcast({ type: "state.patch", module: message.module, patch, updatedAt: store.getState().updatedAt });
         return;
       }
 
@@ -330,15 +363,14 @@ async function start() {
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa"
     });
     app.use(vite.middlewares);
   }
 
-  const port = Number(process.env.PORT || 3000);
-  server.listen(port, "0.0.0.0", () => {
-    console.log(`VAD show control listening on http://localhost:${port}`);
+  server.listen(SHOW_CONTROL_PORT, "0.0.0.0", () => {
+    console.log(`VAD show control listening on http://localhost:${SHOW_CONTROL_PORT}`);
   });
 }
 

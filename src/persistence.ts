@@ -7,6 +7,7 @@ export function loadSnapshotSync(snapshotPath: string): PerformanceState | null 
   try {
     if (!fs.existsSync(snapshotPath)) return null;
     const raw = fs.readFileSync(snapshotPath, "utf8");
+    if (!raw.trim()) return null;
     return hydrateState(JSON.parse(raw));
   } catch (error) {
     console.warn(`Could not load show snapshot from ${snapshotPath}:`, error);

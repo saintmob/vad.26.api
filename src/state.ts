@@ -245,10 +245,6 @@ export class ShowStateStore {
     this.state.modules.audio.activeSourceId = frame.sourceId;
     this.state.modules.audio.masterLevel = frame.muted ? 0 : frame.level;
     this.touch();
-    this.appendEvent("mixer.audioFrame", "audio", frame.sourceId, `${frame.displayName} ${Math.round(frame.level * 100)}%`, {
-      level: frame.level,
-      muted: frame.muted
-    });
     return this.state;
   }
 
@@ -264,7 +260,9 @@ export class ShowStateStore {
       this.state.modules.interaction.screenTopology = normalizeScreenTopology(this.state.modules.interaction.screenTopology);
     }
     this.touch();
-    this.appendEvent("module.statePatch", moduleName, source, `${moduleName} state updated`, patch);
+    if (moduleName !== "audio") {
+      this.appendEvent("module.statePatch", moduleName, source, `${moduleName} state updated`, patch);
+    }
     return this.state;
   }
 

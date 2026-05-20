@@ -34,6 +34,20 @@ test("serves API spec and initial state", async () => {
   });
 });
 
+test("serves audio summary for the active source", async () => {
+  await withServer(async (baseUrl) => {
+    const state = await fetch(`${baseUrl}/api/state`).then((res) => res.json());
+    const summary = await fetch(`${baseUrl}/api/audio-summary`).then((res) => res.json());
+    const source = state.audioSources[state.modules.audio.activeSourceId];
+
+    assert.ok(source);
+    assert.equal(summary.volume, source.level);
+    assert.equal(summary.beat, source.speaking ? 1 : 0);
+    assert.equal(summary.syncedSignal, source.level);
+    assert.ok(summary.treble >= 0);
+  }, { loadSnapshot: false });
+});
+
 test("accepts legacy mixer frames and updates audio state", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/mixer/frame`, {
@@ -229,8 +243,10 @@ test("websocket sends snapshots, presence, state patches, and control acknowledg
         patch: { activePreset: "Warehouse", masterLevel: 0.64 }
       }));
       const patch = await waitForMessage(ws, (message) => message.type === "state.patch" && message.module === "audio", 2000);
-      assert.equal(patch.state.modules.audio.activePreset, "Warehouse");
-      assert.equal(patch.state.modules.audio.masterLevel, 0.64);
+      assert.equal(patch.patch.activePreset, "Warehouse");
+      assert.equal(patch.patch.masterLevel, 0.64);
+      assert.equal(typeof patch.updatedAt, "number");
+      assert.equal(patch.state, undefined);
 
       ws.send(JSON.stringify({
         type: "control.command",

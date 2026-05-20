@@ -5,6 +5,7 @@ export const performanceSpec = {
     rest: {
       spec: "GET /api/spec",
       stateSnapshot: "GET /api/state",
+      audioSummary: "GET /api/audio-summary",
       eventStream: "GET /api/events",
       submitLegacyAudioFrame: "POST /api/mixer/frame",
       submitModuleState: "POST /api/modules/:module/state",
@@ -57,6 +58,17 @@ export const performanceSpec = {
         module: { enum: ["audio", "visual", "interaction"] },
         patch: { type: "object" },
         source: { type: "string" }
+      }
+    },
+    statePatch: {
+      type: "object",
+      required: ["type", "module", "patch"],
+      properties: {
+        type: { const: "state.patch" },
+        module: { enum: ["audio", "visual", "interaction"] },
+        patch: { type: "object" },
+        updatedAt: { type: "number" },
+        note: { const: "Lightweight patch event; clients that need full state should request state.snapshot or GET /api/state." }
       }
     },
     controlCommand: {
