@@ -113,7 +113,7 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
       };
 
       await firebasePut(`${rootPath}/commands/${safePath(command.id)}`, withToken(command, options.token));
-      await firebasePatch(`${rootPath}/state`, commandToStatePatch(command));
+      await firebasePatch(`${rootPath}/state`, commandToStatePatch(command, latestState));
       await pushEvent(rootPath, "control.command", command.module, command.issuedBy, `${command.command} -> ${command.target}`, {
         id: command.id,
         value: command.value
@@ -160,7 +160,7 @@ function makeClientInfo(status: "online" | "offline"): ClientInfo {
   };
 }
 
-function commandToStatePatch(command: ControlCommand) {
+function commandToStatePatch(command: ControlCommand, currentState?: PerformanceState) {
   const now = Date.now();
   const patch: Record<string, unknown> = {
     updatedAt: now
@@ -216,6 +216,22 @@ function commandToStatePatch(command: ControlCommand) {
   }
 
   if (command.module === "interaction") {
+    if (command.command === "setOperationLock") {
+      const lockValue = isRecord(value) ? value : {};
+      const moduleName = String(lockValue.module || command.target || "");
+      const currentModules = new Set((currentState?.operationLock.lockedModules || []).map(String));
+      const shouldLock = Boolean(lockValue.locked ?? value);
+      if (moduleName) {
+        if (shouldLock) currentModules.add(moduleName);
+        else currentModules.delete(moduleName);
+      }
+      const lockedModules = [...currentModules];
+      patch["operationLock/locked"] = lockedModules.length > 0;
+      patch["operationLock/lockedModules"] = lockedModules;
+      patch["operationLock/ownerModule"] = "dashboard";
+      patch["operationLock/lockedBy"] = command.issuedBy;
+      patch["operationLock/updatedAt"] = now;
+    }
     if (["setInteractionMode", "setMode"].includes(command.command)) patch["modules/interaction/mode"] = String(value || command.target);
     if (command.command === "setIntensity" && typeof value === "number") patch["modules/interaction/intensity"] = clampUnit(value);
     if (command.command === "resetTree") {

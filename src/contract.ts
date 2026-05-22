@@ -90,6 +90,7 @@ export const performanceSpec = {
             "setText",
             "setMode",
             "setIntensity",
+            "setOperationLock",
             "pulseScreen"
           ]
         },

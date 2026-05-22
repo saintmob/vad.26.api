@@ -9,6 +9,7 @@ import {
   Gauge,
   Grid3X3,
   ListChecks,
+  Lock,
   MonitorCog,
   Pause,
   Play,
@@ -18,6 +19,7 @@ import {
   Send,
   SlidersHorizontal,
   Type,
+  Unlock,
   Zap
 } from "lucide-react";
 import type { ControlCommand, ModuleName, PerformanceState } from "../types";
@@ -25,6 +27,10 @@ import { createFirebaseDashboardClient, shouldUseFirebaseRealtime } from "./fire
 import "./styles.css";
 
 type ConnectionState = "connecting" | "connected" | "offline";
+type ScreenSelectionMode = "solid" | "dashed" | "box";
+type SequenceStep = "1/16" | "1/8" | "1/4" | "1/2" | "1";
+type SequenceGroup = { order: number; screenIds: string[] };
+type DragBox = { startX: number; startY: number; currentX: number; currentY: number };
 
 const env = import.meta.env;
 const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
@@ -46,6 +52,35 @@ const moduleLabels: Record<ModuleName, { label: string; icon: React.ReactNode; a
 const interactionModes = ["idle", "interaction", "flow", "climax"];
 const visualScenes = ["Cyber", "Liquid", "Topology", "Pulse", "Void", "Dumbar"];
 const audioPresets = ["Neon Loop", "Warehouse", "Dream Pop", "Break Lab", "EDM Festival", "Echo Bass"];
+const screenSelectionModes: Array<{ id: ScreenSelectionMode; label: string }> = [
+  { id: "solid", label: "实线点选" },
+  { id: "dashed", label: "虚线点选" },
+  { id: "box", label: "框选" }
+];
+const sequenceSteps: SequenceStep[] = ["1/16", "1/8", "1/4", "1/2", "1"];
+const screenLayout: Record<string, React.CSSProperties> = {
+  A1: { gridColumn: "5 / span 4", gridRow: 2 },
+  B1: { gridColumn: 4, gridRow: 3 },
+  B2: { gridColumn: 5, gridRow: 3 },
+  B3: { gridColumn: 6, gridRow: 3 },
+  B4: { gridColumn: 7, gridRow: 3 },
+  B5: { gridColumn: 8, gridRow: 3 },
+  B6: { gridColumn: 9, gridRow: 3 },
+  C1: { gridColumn: 2, gridRow: 4, transform: "rotate(-12deg)" },
+  C2: { gridColumn: 3, gridRow: 4, transform: "rotate(-6deg)" },
+  C3: { gridColumn: 10, gridRow: 4, transform: "rotate(8deg)" },
+  C4: { gridColumn: 11, gridRow: 4, transform: "rotate(14deg)" },
+  D1: { gridColumn: 5, gridRow: 5 },
+  D2: { gridColumn: 6, gridRow: 5 },
+  D3: { gridColumn: 7, gridRow: 5 },
+  G1: { gridColumn: 1, gridRow: 6 },
+  G2: { gridColumn: 1, gridRow: 7 },
+  E1: { gridColumn: 6, gridRow: 6 },
+  F1: { gridColumn: 6, gridRow: 7 },
+  H1: { gridColumn: 12, gridRow: 6 },
+  H2: { gridColumn: 12, gridRow: 7 }
+};
+const screenLayoutOrder = Object.keys(screenLayout);
 
 function App() {
   const [snapshot, setSnapshot] = React.useState<PerformanceState | null>(null);
@@ -53,7 +88,12 @@ function App() {
   const [token, setToken] = React.useState(() => window.localStorage.getItem("vad-control-token") || defaultControlToken);
   const [lastAck, setLastAck] = React.useState("Waiting for control activity");
   const [manualText, setManualText] = React.useState("NEONPULSE");
+  const [screenSelectionMode, setScreenSelectionMode] = React.useState<ScreenSelectionMode>("solid");
+  const [sequenceStep, setSequenceStep] = React.useState<SequenceStep>("1/4");
+  const [sequenceGroups, setSequenceGroups] = React.useState<SequenceGroup[]>([]);
+  const [dragBox, setDragBox] = React.useState<DragBox | null>(null);
   const firebaseClientRef = React.useRef<ReturnType<typeof createFirebaseDashboardClient> | null>(null);
+  const screenGridRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     window.localStorage.setItem("vad-control-token", token);
@@ -206,6 +246,111 @@ function App() {
     }
   }, [postJson]);
 
+  const sequenceOrderByScreen = React.useMemo(() => {
+    const orders = new Map<string, number>();
+    sequenceGroups.forEach((group) => {
+      group.screenIds.forEach((screenId) => orders.set(screenId, group.order));
+    });
+    return orders;
+  }, [sequenceGroups]);
+
+  const addSequenceGroup = React.useCallback((screenIds: string[]) => {
+    const uniqueScreenIds = Array.from(new Set(screenIds.filter((screenId) => screenLayoutOrder.includes(screenId))));
+    if (uniqueScreenIds.length === 0) return;
+    setSequenceGroups((current) => {
+      const alreadySelected = new Set(current.flatMap((group) => group.screenIds));
+      const nextScreenIds = uniqueScreenIds.filter((screenId) => !alreadySelected.has(screenId));
+      if (nextScreenIds.length === 0) return current;
+      const order = current.reduce((max, group) => Math.max(max, group.order), 0) + 1;
+      return [...current, { order, screenIds: nextScreenIds }];
+    });
+  }, []);
+
+  const clearSequence = React.useCallback(() => {
+    setSequenceGroups([]);
+    setDragBox(null);
+  }, []);
+
+  const handleScreenSelect = React.useCallback((screenId: string) => {
+    if (screenSelectionMode === "solid") {
+      clearSequence();
+      void sendControl("interaction", "setScreen", screenId, screenId);
+      return;
+    }
+    if (screenSelectionMode === "dashed") {
+      addSequenceGroup([screenId]);
+    }
+  }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl]);
+
+  const handleBoxPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (screenSelectionMode !== "box" || !screenGridRef.current) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const rect = screenGridRef.current.getBoundingClientRect();
+    const point = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
+    setDragBox(point);
+  }, [screenSelectionMode]);
+
+  const handleBoxPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (screenSelectionMode !== "box" || !screenGridRef.current || !dragBox) return;
+    const rect = screenGridRef.current.getBoundingClientRect();
+    const point = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
+    setDragBox((current) => current ? {
+      ...current,
+      currentX: point.currentX,
+      currentY: point.currentY
+    } : null);
+  }, [dragBox, screenSelectionMode]);
+
+  const handleBoxPointerUp = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (screenSelectionMode !== "box" || !screenGridRef.current || !dragBox) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const grid = screenGridRef.current;
+    const gridRect = grid.getBoundingClientRect();
+    const selectionRect = normalizeRect(dragBox);
+    const selectedScreens = Array.from(grid.querySelectorAll<HTMLButtonElement>("[data-screen-id]"))
+      .filter((button) => {
+        const rect = button.getBoundingClientRect();
+        return rectsIntersect(selectionRect, {
+          left: rect.left - gridRect.left,
+          top: rect.top - gridRect.top,
+          right: rect.right - gridRect.left,
+          bottom: rect.bottom - gridRect.top
+        });
+      })
+      .map((button) => button.dataset.screenId || "")
+      .filter(Boolean);
+    addSequenceGroup(selectedScreens);
+    setDragBox(null);
+  }, [addSequenceGroup, dragBox, screenSelectionMode]);
+
+  const pulseSelectedScreens = React.useCallback(async () => {
+    const groups = sequenceGroups.length > 0
+      ? [...sequenceGroups].sort((a, b) => a.order - b.order)
+      : [{ order: 1, screenIds: [snapshot?.modules.interaction.screenId || "MASTER"] }];
+    const sequenceDelay = stepDurationMs(sequenceStep, snapshot?.show.bpm || 120);
+    for (const group of groups) {
+      await Promise.all(group.screenIds.map((screenId) => sendControl("interaction", "pulseScreen", screenId, screenId)));
+      if (groups.length > 1) await wait(sequenceDelay);
+    }
+  }, [sendControl, sequenceGroups, sequenceStep, snapshot?.modules.interaction.screenId, snapshot?.show.bpm]);
+
+  const setInteractionMode = React.useCallback(async (mode: string) => {
+    if (sequenceGroups.length === 0) {
+      await sendControl("interaction", "setMode", "interaction-mode", mode);
+      return;
+    }
+
+    const groups = [...sequenceGroups].sort((a, b) => a.order - b.order);
+    const sequenceDelay = stepDurationMs(sequenceStep, snapshot?.show.bpm || 120);
+    for (const group of groups) {
+      await Promise.all(group.screenIds.map((screenId) => sendControl("interaction", "setMode", screenId, mode)));
+      if (groups.length > 1) await wait(sequenceDelay);
+    }
+  }, [sendControl, sequenceGroups, sequenceStep, snapshot?.show.bpm]);
+
   if (!snapshot) {
     return (
       <main className="loading-screen">
@@ -216,10 +361,11 @@ function App() {
   }
 
   const show = snapshot.show;
+  const operationLock = snapshot.operationLock;
+  const lockedModules = operationLock.lockedModules || [];
   const clients = Object.values(snapshot.clients);
   const audioSources = Object.values(snapshot.audioSources).sort((a, b) => b.level - a.level);
   const activeSource = snapshot.audioSources[snapshot.modules.audio.activeSourceId] || audioSources[0];
-  const screenTopology = normalizeScreenTopology(snapshot.modules.interaction.screenTopology);
 
   return (
     <main className="app-shell">
@@ -242,11 +388,25 @@ function App() {
 
         <nav className="module-nav" aria-label="Modules">
           {(Object.keys(moduleLabels) as ModuleName[]).map((moduleName) => (
-            <a key={moduleName} href={`#${moduleName}`} style={{ "--accent": moduleLabels[moduleName].accent } as React.CSSProperties}>
-              {moduleLabels[moduleName].icon}
-              <span>{moduleLabels[moduleName].label}</span>
-              <i>{snapshot.modules[moduleName].status}</i>
-            </a>
+            <div key={moduleName} className="module-nav-item" style={{ "--accent": moduleLabels[moduleName].accent } as React.CSSProperties}>
+              <a href={`#${moduleName}`}>
+                {moduleLabels[moduleName].icon}
+                <span>{moduleLabels[moduleName].label}</span>
+                <i>{snapshot.modules[moduleName].status}</i>
+              </a>
+              <button
+                type="button"
+                className={lockedModules.includes(moduleName) ? "module-lock-button locked" : "module-lock-button"}
+                title={lockedModules.includes(moduleName) ? `Unlock ${moduleLabels[moduleName].label}` : `Lock ${moduleLabels[moduleName].label}`}
+                aria-label={lockedModules.includes(moduleName) ? `Unlock ${moduleLabels[moduleName].label}` : `Lock ${moduleLabels[moduleName].label}`}
+                onClick={() => sendControl("interaction", "setOperationLock", moduleName, {
+                  module: moduleName,
+                  locked: !lockedModules.includes(moduleName)
+                })}
+              >
+                {lockedModules.includes(moduleName) ? <Lock size={16} /> : <Unlock size={16} />}
+              </button>
+            </div>
           ))}
         </nav>
 
@@ -370,7 +530,33 @@ function App() {
           </Panel>
 
           <Panel id="interaction" title="Multi-screen Interaction" icon={<MonitorCog size={18} />}>
-            <div className="screen-grid">
+            <div className="screen-tools">
+              {screenSelectionModes.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={screenSelectionMode === mode.id ? "selected" : ""}
+                  onClick={() => {
+                    setScreenSelectionMode(mode.id);
+                    setDragBox(null);
+                    if (mode.id === "solid") clearSequence();
+                  }}
+                >
+                  {mode.label}
+                </button>
+              ))}
+              {sequenceGroups.length > 0 && (
+                <button type="button" onClick={clearSequence}>清除顺序</button>
+              )}
+            </div>
+            <div
+              className={`screen-grid selection-mode-${screenSelectionMode}`}
+              ref={screenGridRef}
+              onPointerDown={handleBoxPointerDown}
+              onPointerMove={handleBoxPointerMove}
+              onPointerUp={handleBoxPointerUp}
+              onPointerCancel={() => setDragBox(null)}
+            >
               <button
                 type="button"
                 className={snapshot.modules.interaction.screenId === "MASTER" ? "selected master-screen" : "master-screen"}
@@ -378,20 +564,23 @@ function App() {
               >
                 MASTER
               </button>
-              {screenTopology.flatMap((row, rowIndex) =>
-                row.map((screenId, index) => screenId ? (
-                  <button
-                    key={screenId}
-                    type="button"
-                    className={snapshot.modules.interaction.screenId === screenId ? "selected" : ""}
-                    style={{ gridColumn: index + 1, gridRow: rowIndex + 2 }}
-                    onClick={() => sendControl("interaction", "setScreen", screenId, screenId)}
-                  >
-                    {screenId}
-                  </button>
-                ) : (
-                  <span key={`empty-${rowIndex}-${index}`} style={{ gridColumn: index + 1, gridRow: rowIndex + 2 }} />
-                ))
+              {screenLayoutOrder.map((screenId) => (
+                <button
+                  key={screenId}
+                  type="button"
+                  data-screen-id={screenId}
+                  className={screenButtonClassName(screenId, snapshot.modules.interaction.screenId, sequenceOrderByScreen)}
+                  style={screenLayout[screenId]}
+                  onClick={() => handleScreenSelect(screenId)}
+                >
+                  {screenId}
+                  {sequenceOrderByScreen.has(screenId) && (
+                    <span className="screen-order">{sequenceOrderByScreen.get(screenId)}</span>
+                  )}
+                </button>
+              ))}
+              {dragBox && (
+                <span className="selection-box" style={dragBoxStyle(dragBox)} />
               )}
             </div>
 
@@ -401,21 +590,41 @@ function App() {
               <span>{snapshot.modules.interaction.gestureActive ? "gesture active" : "gesture idle"}</span>
             </div>
 
+            {sequenceGroups.length > 0 && (
+              <div className="sequence-step-control">
+                <span>Step</span>
+                {sequenceSteps.map((step) => (
+                  <button
+                    key={step}
+                    type="button"
+                    className={sequenceStep === step ? "selected" : ""}
+                    onClick={() => setSequenceStep(step)}
+                  >
+                    {step}
+                  </button>
+                ))}
+                <small>{Math.round(stepDurationMs(sequenceStep, snapshot.show.bpm))}ms @ {snapshot.show.bpm} BPM</small>
+              </div>
+            )}
+
             <div className="button-row">
               {interactionModes.map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   className={snapshot.modules.interaction.mode === mode ? "selected" : ""}
-                  onClick={() => sendControl("interaction", "setMode", "interaction-mode", mode)}
+                  onClick={() => void setInteractionMode(mode)}
                 >
                   {mode}
                 </button>
               ))}
-              <button type="button" onClick={() => sendControl("interaction", "pulseScreen", snapshot.modules.interaction.screenId, snapshot.modules.interaction.screenId)}>
+              <button type="button" onClick={pulseSelectedScreens}>
                 <Zap size={15} /> Pulse
               </button>
-              <button type="button" onClick={() => sendControl("interaction", "resetTree", "tree", true)}>
+              <button type="button" onClick={() => {
+                clearSequence();
+                void sendControl("interaction", "resetTree", "tree", true);
+              }}>
                 Reset tree
               </button>
             </div>
@@ -558,6 +767,68 @@ function normalizeScreenTopology(value: unknown): string[][] {
     return rows;
   }
   return [];
+}
+
+function screenButtonClassName(screenId: string, activeScreenId: string, sequenceOrderByScreen: Map<string, number>) {
+  return [
+    activeScreenId === screenId ? "selected" : "",
+    sequenceOrderByScreen.has(screenId) ? "sequenced" : ""
+  ].filter(Boolean).join(" ");
+}
+
+function normalizeRect(box: DragBox) {
+  const left = Math.min(box.startX, box.currentX);
+  const right = Math.max(box.startX, box.currentX);
+  const top = Math.min(box.startY, box.currentY);
+  const bottom = Math.max(box.startY, box.currentY);
+  return { left, right, top, bottom };
+}
+
+function rectsIntersect(
+  first: { left: number; right: number; top: number; bottom: number },
+  second: { left: number; right: number; top: number; bottom: number }
+) {
+  return first.left <= second.right
+    && first.right >= second.left
+    && first.top <= second.bottom
+    && first.bottom >= second.top;
+}
+
+function dragBoxStyle(box: DragBox): React.CSSProperties {
+  const rect = normalizeRect(box);
+  return {
+    left: rect.left,
+    top: rect.top,
+    width: rect.right - rect.left,
+    height: rect.bottom - rect.top
+  };
+}
+
+function clampPoint(x: number, y: number, rect: DOMRect): DragBox {
+  const currentX = Math.max(0, Math.min(rect.width, x));
+  const currentY = Math.max(0, Math.min(rect.height, y));
+  return {
+    startX: currentX,
+    startY: currentY,
+    currentX,
+    currentY
+  };
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+function stepDurationMs(step: SequenceStep, bpm: number) {
+  const beatMs = 60000 / Math.max(1, bpm);
+  const beatMultipliers: Record<SequenceStep, number> = {
+    "1/16": 0.25,
+    "1/8": 0.5,
+    "1/4": 1,
+    "1/2": 2,
+    "1": 4
+  };
+  return beatMs * beatMultipliers[step];
 }
 
 createRoot(document.getElementById("root")!).render(
