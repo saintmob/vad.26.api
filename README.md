@@ -1,184 +1,175 @@
-# VAD Public Performance Backend
+# VAD 现场总控 API（4300）
 
-Public backend and show-control dashboard for one live performance made of three cooperating modules: audio, visual effects, and multi-screen interaction.
+这个仓库是整场室内 DJ / VJ / 多屏演出的总控后端与控制台。它负责保存全局状态、转发实时控制命令、接收 DJ 音频特征、管理 VJ 与 baofa 的屏幕路由。
 
-The first version is built for local or LAN rehearsal/show control. It keeps the authoritative show state in memory and persists a debounced JSON snapshot to disk so the server can recover after a restart.
+## 模块关系
 
-## Stack
+固定端口如下：
 
-- Node 20
-- TypeScript
-- Express
-- WebSocket (`ws`)
-- Vite + React + TypeScript dashboard
+| 模块 | 仓库 | 端口 | 职责 |
+| --- | --- | --- | --- |
+| 总控 API | `vad.26.api` | `4300` | 全局状态、Dashboard、WebSocket、屏幕路由 |
+| DJ | `mixer-target-123` | `4301` | 播放/混音，向 4300 发布实时音频特征 |
+| VJ | `visual-dynamic-effect` | `4302` | 视觉控制台与 `/screen/<screenId>` VJ 输出 |
+| 多屏 | `baofa` | `4303` | 原生多屏特效与 `/screen/<screenId>` baofa 输出 |
 
-## Run
+本地默认通信地址：
+
+- HTTP：`http://localhost:4300`
+- WebSocket：`ws://localhost:4300/ws`
+
+跨机器部署时，只替换 `localhost` 为控制机 LAN IP，端口保持不变。
+
+## 启动
 
 ```bash
 npm install
+npm run dev
+```
+
+打开：
+
+```text
+http://localhost:4300
+```
+
+生产构建：
+
+```bash
 npm run build
 npm start
 ```
 
-Open `http://localhost:4300` by default.
-
-Useful environment variables:
-
-- `SHOW_STATE_PATH`: snapshot path. Default: `data/show-state.json`.
-- `CONTROL_TOKEN`: optional shared control token. When set, mutating REST calls and WS control/state messages must include the token.
-
-Development mode:
-
-```bash
-npm run dev
-```
-
-Tests:
+测试：
 
 ```bash
 npm test
 ```
 
-## Vercel Deployment
+## 现场推荐启动顺序
 
-This project can be deployed to Vercel as a Vite dashboard plus REST API function.
+1. 启动 4300 总控。
+2. 启动 4301 DJ。
+3. 启动 4302 VJ。
+4. 启动 4303 baofa。
+5. 每台屏幕机器只打开 `http://localhost:4300/screen/<screenId>`。
 
-Vercel deployment behavior:
-
-- Dashboard assets are built into `dist/client`.
-- `/api/*` is routed to the Vercel Function in `api/index.ts`.
-- File snapshots are disabled in the Vercel Function because the serverless filesystem is not durable.
-- WebSocket `/ws` is not available on Vercel Functions. Use the local/LAN server for live show control, or move realtime transport to Firebase Realtime Database, Ably, Pusher, or another realtime provider.
-
-Required Vercel environment variables are listed in `.env.example`. Configure at least `CONTROL_TOKEN` for mutating API calls, plus the Firebase variables if using Firebase-backed adapters.
-
-## Dashboard
-
-The root route serves the show-control dashboard in production. The first screen is the control surface, not a landing page.
-
-Main panels:
-
-- Show transport, BPM, position, and last command ack.
-- Module connection status.
-- Audio source matrix and audio presets.
-- Visual scene, preset, color, and text controls.
-- Multi-screen topology, screen targeting, mode, pulse, intensity, and tree reset.
-- Live event log and connected clients.
-
-All dashboard commands go through the same `/api/control` contract used by external module adapters.
-
-## REST API
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/spec` | Returns protocol metadata, REST routes, WS message types, and state fields. |
-| `GET` | `/api/state` | Returns the full show snapshot. |
-| `POST` | `/api/mixer/frame` | Compatibility endpoint for legacy realtime audio frames. |
-| `POST` | `/api/modules/:module/state` | Applies a module state patch. `module` must be `audio`, `visual`, or `interaction`. |
-| `POST` | `/api/control` | Issues a normalized show-control command. |
-| `POST` | `/api/show/reset` | Resets the current show state to defaults. |
-| `POST` | `/api/show/snapshot` | Forces an immediate snapshot save. |
-| `GET` | `/api/events` | Read-only Server-Sent Events stream. |
-
-If `CONTROL_TOKEN` is configured, pass it as either:
-
-- `x-control-token: <token>`
-- `Authorization: Bearer <token>`
-
-## WebSocket
-
-Connect to:
+屏幕 ID：
 
 ```text
-ws://localhost:4300/ws
+A1
+B1 B2 B3 B4 B5 B6
+C1 C2 C3 C4
+D1 D2 D3
+E1 F1
+L1 L2
+R1 R2
 ```
 
-Client-to-server messages:
+## Dashboard 操作方式
+
+### Visual Control
+
+Visual Control 控制 4302 VJ：
+
+- `setScene`
+- `setPreset`
+- `setText`
+- `setFx`
+- `setFullscreen`
+
+这些命令通过 `/api/control` 进入 4300，再经 WebSocket 广播给 VJ。屏幕已经路由到 VJ 时，VJ 的 `/screen/<screenId>` 页面也会接收这些命令。
+
+### Multi-screen Interaction
+
+Multi-screen Interaction 控制 4303 baofa 与屏幕路由：
+
+- `Balanced`：A1、L1、L2、R1、R2 给 VJ，其余给 baofa。
+- `VJ Takeover`：A1、B1-B6、L1、L2、R1、R2 给 VJ，其余给 baofa。
+- `Baofa Takeover`：全部给 baofa。
+
+每个屏幕可单独设置 owner：
+
+- `VJ`：跳转到 `http://localhost:4302/screen/<screenId>`
+- `Baofa`：跳转到 `http://localhost:4303/screen/<screenId>`
+- `Off` / `Diag`：停留在 4300 本地状态页
+
+baofa 额外控制：
+
+- `idle / interaction / flow / climax`
+- `Pulse`
+- `Reset tree`
+- `Tree / Firework`
+- `Show menus`
+- `Show debug`
+- `Auto redirect`
+
+当从 `Firework` 切回任意 baofa 模式按钮时，总控会把 `visualMode` 复位为 `tree`，避免烟花模式锁住其它效果。
+
+## 屏幕入口
+
+现场每台屏幕统一打开：
+
+```text
+http://localhost:4300/screen/A1
+http://localhost:4300/screen/B3
+http://localhost:4300/screen/R2
+```
+
+4300 会读取当前路由并自动跳转：
+
+- owner 为 `vj`：跳到 4302 VJ screen。
+- owner 为 `baofa`：跳到 4303 baofa screen。
+- owner 为 `off` 或 `diagnostic`：停留在 4300 状态页。
+
+演出中不需要人工改屏幕 URL。
+
+## API
+
+常用接口：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/state` | 获取完整演出状态 |
+| `GET` | `/api/audio-summary` | 获取 DJ 最新音频摘要 |
+| `POST` | `/api/mixer/frame` | 兼容旧 DJ 音频帧 |
+| `POST` | `/api/modules/:module/state` | 模块状态上报 |
+| `POST` | `/api/control` | 发送控制命令 |
+| `GET` | `/api/events` | SSE 事件流 |
+| `GET` | `/ws` | WebSocket 实时通道 |
+
+WebSocket 主要消息：
 
 - `client.hello`
-- `heartbeat`
 - `mixer.audioFrame`
 - `module.statePatch`
-- `module.telemetry`
 - `control.command`
-- `cue.fire`
-- `ui.subscribe`
-
-Server-to-client messages:
-
 - `state.snapshot`
 - `state.patch`
-- `control.command`
 - `control.ack`
-- `client.presence`
-- `error`
 
-When `CONTROL_TOKEN` is configured, pass it with `?token=<token>` on the WS URL, or include `token` / `authToken` on mutating messages.
+## 鉴权
 
-## Command Format
+本地排练可以不设置 token。若设置：
 
-```json
-{
-  "module": "visual",
-  "target": "show-main",
-  "command": "setScene",
-  "value": "Liquid",
-  "issuedBy": "dashboard"
-}
+```bash
+CONTROL_TOKEN=your-token
 ```
 
-The server adds an `id` and `timestamp` if the client does not provide them, applies known commands to the central state, appends the command log, broadcasts the command, and returns an ack.
+则 mutating REST 请求与 WebSocket 控制消息需要携带：
 
-## Module State Patch
+- Header：`x-control-token: your-token`
+- 或 WebSocket query：`ws://localhost:4300/ws?token=your-token`
 
-```json
-{
-  "screenId": "MASTER",
-  "mode": "flow",
-  "intensity": 0.72,
-  "treeGrowth": 0.41,
-  "gestureActive": true
-}
-```
+`VITE_CONTROL_TOKEN` 只适合本地/LAN 前端自动填入控制台使用。所有 `VITE_` 变量都会进入浏览器 bundle，不是秘密；公网部署时不要把高权限 token 放在 `VITE_CONTROL_TOKEN` 里。
 
-Send it to:
+## Vercel / 远程部署说明
 
-```text
-POST /api/modules/interaction/state
-```
+这个项目可以构建 Dashboard，但现场实时 WebSocket 与本地多模块联动优先使用本机或 LAN。Vercel Serverless 环境不适合作为现场实时总线；如果要公网部署，需要替换为可持续连接的实时服务，并重新配置各模块的后端地址。
 
-or over WS:
+## 开发注意
 
-```json
-{
-  "type": "module.statePatch",
-  "module": "interaction",
-  "patch": {
-    "mode": "flow",
-    "intensity": 0.72
-  }
-}
-```
-
-## Show State
-
-The top-level state is centered around one `show`:
-
-- `show`: status, timing, BPM, beat, bar.
-- `modules.audio`: transport, master level, active tab, slots, FX, and `.musicarr` summary.
-- `modules.visual`: scene, preset, colors, FX, text, audio-drive mode, fullscreen, and memory summary.
-- `modules.interaction`: screen topology, selected screen, overview/master mode, intensity, tree growth, gesture state, and last interaction.
-- `clients`: connected module/dashboard instances.
-- `commandLog` and `eventLog`: bounded recent history for dashboard review.
-
-The server still exposes legacy mixer fields such as `audioSources` and `/api/mixer/frame` for compatibility.
-
-## Current Scope
-
-This repository is now the common backend and dashboard only. The audio, visual, and multi-screen module repositories are not modified in this phase.
-
-Known follow-up prerequisites before module adapters:
-
-- The local `baofa` remote did not match the user-provided GitHub URL during inventory.
-- A local `visual-dynamic-effect` Git repository was not found during inventory.
-- The first version has no login system. Use `CONTROL_TOKEN` for a shared local control token when needed.
+- 端口固定，不自动漂移。
+- 现场模式禁用 Vite HMR，避免 HMR WebSocket 端口冲突。
+- `tasks/` 是本地任务记录目录，不提交。
+- 不要让模块上报未知屏幕 ID；4300 会过滤非现场 20 屏 ID。

@@ -452,6 +452,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
   if (command.module === "interaction") {
     if (["setInteractionMode", "setMode"].includes(command.command)) {
       state.modules.interaction.mode = String(value || command.target) as InteractionModuleState["mode"];
+      state.modules.interaction.visualMode = "tree";
     }
     if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value, state.modules.interaction.intensity);
     if (command.command === "resetTree") {

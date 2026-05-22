@@ -294,6 +294,21 @@ test("applies baofa visual mode controls", async () => {
     assert.equal(response.status, 202);
     assert.equal(body.state.modules.interaction.visualMode, "firework");
     assert.equal(body.state.commandLog[0].command, "setVisualMode");
+
+    const modeResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "interaction-mode",
+        command: "setMode",
+        value: "flow"
+      })
+    });
+    const modeBody = await modeResponse.json();
+    assert.equal(modeResponse.status, 202);
+    assert.equal(modeBody.state.modules.interaction.mode, "flow");
+    assert.equal(modeBody.state.modules.interaction.visualMode, "tree");
   });
 });
 
