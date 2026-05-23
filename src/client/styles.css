@@ -171,6 +171,12 @@ input {
   gap: 8px;
 }
 
+.module-nav-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
 .module-nav a {
   gap: 10px;
   min-height: 42px;
@@ -181,6 +187,23 @@ input {
   color: var(--text);
   text-decoration: none;
   background: var(--panel);
+}
+
+.module-lock-button {
+  width: 42px;
+  min-height: 42px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.module-lock-button.locked {
+  border-color: rgba(255, 200, 87, 0.72);
+  background: rgba(255, 200, 87, 0.1);
+  color: var(--interaction);
 }
 
 .module-nav a i {
@@ -227,6 +250,8 @@ input {
 .interaction-readout,
 .route-presets,
 .screen-presentation-controls,
+.screen-tools,
+.sequence-step-control,
 .owner-switch {
   display: flex;
   align-items: center;
@@ -439,6 +464,7 @@ input {
     rgba(255, 255, 255, 0.015);
   aspect-ratio: 11 / 6.4;
   overflow: hidden;
+  touch-action: none;
 }
 
 .screen-grid button {
@@ -453,6 +479,10 @@ input {
   border-radius: 5px;
   font-size: 10px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.screen-grid.selection-mode-box button {
+  pointer-events: none;
 }
 
 .screen-grid .master-screen {
@@ -486,6 +516,37 @@ input {
   border-color: rgba(255, 107, 107, 0.72);
 }
 
+.screen-grid button.sequenced {
+  border-style: dashed;
+  border-color: rgba(124, 184, 255, 0.9);
+}
+
+.screen-order {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(124, 184, 255, 0.9);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #17263a;
+  color: #f5f7fb;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.selection-box {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed rgba(124, 184, 255, 0.95);
+  background: rgba(124, 184, 255, 0.08);
+  pointer-events: none;
+}
+
 .interaction-readout {
   margin-top: 12px;
 }
@@ -504,6 +565,22 @@ input {
 
 .screen-presentation-controls {
   margin-top: 10px;
+}
+
+.screen-tools,
+.sequence-step-control {
+  margin-top: 10px;
+}
+
+.sequence-step-control > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.sequence-step-control small {
+  color: var(--muted);
 }
 
 .route-table {

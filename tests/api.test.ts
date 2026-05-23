@@ -35,7 +35,8 @@ test("serves API spec and initial state", async () => {
     assert.equal(Object.keys(state.modules.interaction.screenRoutes).length, 20);
     assert.equal(state.modules.interaction.screenRoutes.A1.owner, "vj");
     assert.equal(state.modules.interaction.screenRoutes.B1.owner, "baofa");
-    assert.equal(state.modules.interaction.screenRoutes.L1.url, "http://localhost:4302/screen/L1");
+    assert.equal(state.modules.interaction.screenRoutes.A1.url, "http://localhost:4302/screen/A1");
+    assert.equal(state.modules.interaction.screenRoutes.H2.url, "http://localhost:4303/screen/H2");
     assert.equal(state.modules.interaction.screenPresentation.autoRedirect, true);
     assert.equal(state.modules.interaction.screenPresentation.showDebug, false);
     assert.equal(state.modules.interaction.screenPresentation.showMenu, false);
@@ -96,7 +97,7 @@ test("accepts interaction module patch for screen route preset", async () => {
     assert.equal(response.status, 202);
     assert.equal(body.state.modules.interaction.screenRoutePreset, "baofa_takeover");
     assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "baofa");
-    assert.equal(body.state.modules.interaction.screenRoutes.R2.url, "http://localhost:4303/screen/R2");
+    assert.equal(body.state.modules.interaction.screenRoutes.H2.url, "http://localhost:4303/screen/H2");
   });
 });
 
@@ -231,7 +232,7 @@ test("accepts module state patches", async () => {
   });
 });
 
-test("normalizes flat interaction screen topology patches", async () => {
+test("migrates legacy side screen topology ids", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
       method: "POST",
@@ -248,10 +249,15 @@ test("normalizes flat interaction screen topology patches", async () => {
     const body = await response.json();
     assert.equal(response.status, 202);
     assert.deepEqual(body.state.modules.interaction.screenTopology, [
-      ["A1", "B1", "L1", "R2"]
+      ["A1"],
+      ["B1", "B2", "B3", "B4", "B5", "B6"],
+      ["C1", "C2", "C3", "C4"],
+      ["D1", "D2", "D3"],
+      ["G1", "E1", "H1"],
+      ["G2", "F1", "H2"]
     ]);
     assert.equal(body.state.modules.interaction.screenTopology[0][0], "A1");
-    assert.equal(body.state.modules.interaction.screenTopology.flat().includes("G1"), false);
+    assert.equal(body.state.modules.interaction.screenTopology.flat().includes("G1"), true);
   });
 });
 
@@ -274,6 +280,128 @@ test("accepts control commands and records control log", async () => {
     assert.equal(response.status, 202);
     assert.equal(body.state.audioSources["mic-teacher"].muted, true);
     assert.equal(body.state.commandLog[0].command, "setMute");
+  });
+});
+
+test("operation lock is module-scoped and allows central control", async () => {
+  await withServer(async (baseUrl) => {
+    const rejectedModuleLock = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "visual",
+        command: "setOperationLock",
+        value: { module: "visual", locked: true },
+        issuedBy: "interaction-desk"
+      })
+    });
+    assert.equal(rejectedModuleLock.status, 423);
+
+    const locked = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "visual",
+        command: "setOperationLock",
+        value: { module: "visual", locked: true },
+        issuedBy: "dashboard-main"
+      })
+    });
+    const lockedBody = await locked.json();
+    assert.equal(locked.status, 202);
+    assert.equal(lockedBody.state.operationLock.locked, true);
+    assert.deepEqual(lockedBody.state.operationLock.lockedModules, ["visual"]);
+
+    const rejectedVisual = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Pulse",
+        issuedBy: "vj"
+      })
+    });
+    const rejectedVisualBody = await rejectedVisual.json();
+    assert.equal(rejectedVisual.status, 423);
+    assert.equal(rejectedVisualBody.error, "Operation lock active");
+
+    const acceptedAudio = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "audio",
+        target: "mic-teacher",
+        command: "setMute",
+        value: true,
+        issuedBy: "dj"
+      })
+    });
+    assert.equal(acceptedAudio.status, 202);
+
+    const acceptedDashboardVisual = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Pulse",
+        issuedBy: "dashboard-main"
+      })
+    });
+    assert.equal(acceptedDashboardVisual.status, 202);
+
+    const rejectedVisualPatch = await fetch(`${baseUrl}/api/modules/visual/state`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        patch: { scene: "Bypass" },
+        source: "vj"
+      })
+    });
+    const rejectedVisualPatchBody = await rejectedVisualPatch.json();
+    assert.equal(rejectedVisualPatch.status, 423);
+    assert.equal(rejectedVisualPatchBody.error, "Operation lock active");
+
+    const acceptedDashboardPatch = await fetch(`${baseUrl}/api/modules/visual/state`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        patch: { scene: "Dashboard Bypass" },
+        source: "dashboard-main"
+      })
+    });
+    assert.equal(acceptedDashboardPatch.status, 202);
+
+    const unlocked = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "visual",
+        command: "setOperationLock",
+        value: { module: "visual", locked: false },
+        issuedBy: "dashboard-main"
+      })
+    });
+    assert.equal(unlocked.status, 202);
+
+    const acceptedVisual = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Pulse",
+        issuedBy: "vj"
+      })
+    });
+    assert.equal(acceptedVisual.status, 202);
   });
 });
 

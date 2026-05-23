@@ -44,6 +44,14 @@ export interface ShowState {
   bar: number;
 }
 
+export interface OperationLockState {
+  locked: boolean;
+  lockedModules: ModuleName[];
+  ownerModule: ModuleName | "dashboard";
+  lockedBy: string | null;
+  updatedAt: number | null;
+}
+
 export interface ScreenPoint {
   x: number;
   y: number;
@@ -167,6 +175,7 @@ export interface PerformanceState {
   performanceProtocolVersion: "performance.show.v1";
   updatedAt: number;
   show: ShowState;
+  operationLock: OperationLockState;
   room: {
     id: string;
     name: string;

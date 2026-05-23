@@ -23,19 +23,20 @@ export const SCREEN_IDS = [
   "C1", "C2", "C3", "C4",
   "D1", "D2", "D3",
   "E1", "F1",
-  "L1", "L2", "R1", "R2"
+  "G1", "G2", "H1", "H2"
 ] as const;
 
 const SCREEN_TOPOLOGY = [
-  ["L1", "A1", "R1"],
-  ["L2", "B1", "B2", "B3", "B4", "B5", "B6", "R2"],
+  ["A1"],
+  ["B1", "B2", "B3", "B4", "B5", "B6"],
   ["C1", "C2", "C3", "C4"],
   ["D1", "D2", "D3"],
-  ["E1", "F1"]
+  ["G1", "E1", "H1"],
+  ["G2", "F1", "H2"]
 ];
 
-const VJ_SCREEN_IDS = new Set(["A1", "L1", "L2", "R1", "R2"]);
-const VJ_TAKEOVER_SCREEN_IDS = new Set(["A1", "B1", "B2", "B3", "B4", "B5", "B6", "L1", "L2", "R1", "R2"]);
+const VJ_SCREEN_IDS = new Set(["A1"]);
+const VJ_TAKEOVER_SCREEN_IDS = new Set(["A1", "B1", "B2", "B3", "B4", "B5", "B6"]);
 
 export function isModuleName(value: unknown): value is ModuleName {
   return typeof value === "string" && MODULE_NAMES.includes(value as ModuleName);
@@ -55,6 +56,13 @@ export function createDefaultState(now = Date.now()): PerformanceState {
       bpm: 120,
       beat: 0,
       bar: 1
+    },
+    operationLock: {
+      locked: false,
+      lockedModules: [],
+      ownerModule: "dashboard",
+      lockedBy: null,
+      updatedAt: null
     },
     room: {
       id: "classroom-a",
@@ -251,7 +259,8 @@ function inferModule(command: string): ControlCommand["module"] {
     "setScreenAutoRedirect",
     "setScreenDebugVisible",
     "setScreenMenuVisible",
-    "setScreenPresentation"
+    "setScreenPresentation",
+    "setOperationLock"
   ].includes(command)) return "interaction";
   if (["play", "pause", "reset", "setBpm", "seek"].includes(command)) return "show";
   if (command === "focusVideo") return "video";
@@ -326,6 +335,19 @@ export class ShowStateStore {
       value: command.value
     });
     return this.state;
+  }
+
+  canApplyControlCommand(command: ControlCommand): boolean {
+    if (command.command === "setOperationLock") return isCentralControlSource(command.issuedBy);
+    if (isCentralControlSource(command.issuedBy)) return true;
+    const moduleName = normalizeLockModule(command.module);
+    if (!moduleName) return true;
+    return !this.state.operationLock.lockedModules.includes(moduleName);
+  }
+
+  canApplyModulePatch(moduleName: ModuleName, source = "module"): boolean {
+    if (isCentralControlSource(source)) return true;
+    return !this.state.operationLock.lockedModules.includes(moduleName);
   }
 
   registerClient(message: ClientHelloMessage, fallbackId: string): ClientInfo {
@@ -450,6 +472,16 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
   }
 
   if (command.module === "interaction") {
+    if (command.command === "setOperationLock") {
+      const lockedModules = nextLockedModules(state.operationLock.lockedModules, command.target, value);
+      state.operationLock = {
+        locked: lockedModules.length > 0,
+        lockedModules,
+        ownerModule: "dashboard",
+        lockedBy: command.issuedBy,
+        updatedAt: Date.now()
+      };
+    }
     if (["setInteractionMode", "setMode"].includes(command.command)) {
       state.modules.interaction.mode = String(value || command.target) as InteractionModuleState["mode"];
       state.modules.interaction.visualMode = "tree";
@@ -514,6 +546,10 @@ function normalizeBands(value: unknown) {
 }
 
 function normalizePerformanceState(state: PerformanceState): PerformanceState {
+  state.operationLock.lockedModules = normalizeLockedModules(
+    state.operationLock.lockedModules || (state.operationLock.locked ? MODULE_NAMES : [])
+  );
+  state.operationLock.locked = state.operationLock.lockedModules.length > 0;
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
   state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
@@ -526,6 +562,41 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
     state.modules.interaction.screenRoutePreset
   );
   return state;
+}
+
+function isCentralControlSource(source: unknown): boolean {
+  const normalized = String(source || "").toLowerCase();
+  return normalized.includes("dashboard") || normalized.includes("central") || normalized.includes("control-room") || normalized.includes("中控");
+}
+
+function normalizeLockModule(value: unknown): ModuleName | null {
+  if (value === "video") return "visual";
+  return isModuleName(value) ? value : null;
+}
+
+function normalizeLockedModules(value: unknown): ModuleName[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map(normalizeLockModule).filter((item): item is ModuleName => Boolean(item))));
+}
+
+function nextLockedModules(current: ModuleName[], target: string, value: unknown): ModuleName[] {
+  const lockedModules = new Set(normalizeLockedModules(current));
+  const record = isRecord(value) ? value : {};
+  const modulesValue = Array.isArray(record.modules) ? record.modules : undefined;
+  const moduleValue = normalizeLockModule(record.module || target);
+  const modules = modulesValue
+    ? modulesValue.map(normalizeLockModule).filter((item): item is ModuleName => Boolean(item))
+    : moduleValue
+      ? [moduleValue]
+      : [...MODULE_NAMES];
+  const shouldLock = typeof record.locked === "boolean" ? record.locked : Boolean(value);
+
+  for (const moduleName of modules) {
+    if (shouldLock) lockedModules.add(moduleName);
+    else lockedModules.delete(moduleName);
+  }
+
+  return [...lockedModules];
 }
 
 function normalizeScreenPresentation(value: unknown): InteractionModuleState["screenPresentation"] {
@@ -625,6 +696,8 @@ function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
 function normalizeScreenTopology(value: unknown): string[][] {
   if (!Array.isArray(value)) return SCREEN_TOPOLOGY;
   if (value.every((row) => Array.isArray(row))) {
+    const rawScreens = value.flat().map((screenId) => String(screenId || "").trim());
+    if (hasLegacySideScreenIds(rawScreens)) return SCREEN_TOPOLOGY;
     const rows = value
       .map((row) => row
         .map((screenId) => String(screenId || "").trim())
@@ -633,9 +706,9 @@ function normalizeScreenTopology(value: unknown): string[][] {
     return rows.length > 0 ? rows : SCREEN_TOPOLOGY;
   }
   if (value.every((screenId) => typeof screenId === "string")) {
-    const screens = value
-      .map((screenId) => screenId.trim())
-      .filter((screenId) => (SCREEN_IDS as readonly string[]).includes(screenId));
+    const rawScreens = value.map((screenId) => screenId.trim());
+    if (hasLegacySideScreenIds(rawScreens)) return SCREEN_TOPOLOGY;
+    const screens = rawScreens.filter((screenId) => (SCREEN_IDS as readonly string[]).includes(screenId));
     if (screens.length === 0) return SCREEN_TOPOLOGY;
     const rows: string[][] = [];
     for (let index = 0; index < screens.length; index += 6) {
@@ -644,6 +717,10 @@ function normalizeScreenTopology(value: unknown): string[][] {
     return rows;
   }
   return SCREEN_TOPOLOGY;
+}
+
+function hasLegacySideScreenIds(screenIds: string[]) {
+  return screenIds.some((screenId) => ["L1", "L2", "R1", "R2"].includes(screenId));
 }
 
 function clampUnit(value: unknown, fallback = 0) {
