@@ -18,11 +18,12 @@ import {
   Save,
   Send,
   SlidersHorizontal,
+  Sparkles,
   Type,
   Unlock,
   Zap
 } from "lucide-react";
-import type { ControlCommand, ModuleName, PerformanceState } from "../types";
+import type { ControlCommand, ModuleName, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
 import { createFirebaseDashboardClient, shouldUseFirebaseRealtime } from "./firebaseShowControl";
 import "./styles.css";
 
@@ -58,29 +59,57 @@ const screenSelectionModes: Array<{ id: ScreenSelectionMode; label: string }> = 
   { id: "box", label: "框选" }
 ];
 const sequenceSteps: SequenceStep[] = ["1/16", "1/8", "1/4", "1/2", "1"];
-const screenLayout: Record<string, React.CSSProperties> = {
-  A1: { gridColumn: "5 / span 4", gridRow: 2 },
-  B1: { gridColumn: 4, gridRow: 3 },
-  B2: { gridColumn: 5, gridRow: 3 },
-  B3: { gridColumn: 6, gridRow: 3 },
-  B4: { gridColumn: 7, gridRow: 3 },
-  B5: { gridColumn: 8, gridRow: 3 },
-  B6: { gridColumn: 9, gridRow: 3 },
-  C1: { gridColumn: 2, gridRow: 4, transform: "rotate(-12deg)" },
-  C2: { gridColumn: 3, gridRow: 4, transform: "rotate(-6deg)" },
-  C3: { gridColumn: 10, gridRow: 4, transform: "rotate(8deg)" },
-  C4: { gridColumn: 11, gridRow: 4, transform: "rotate(14deg)" },
-  D1: { gridColumn: 5, gridRow: 5 },
-  D2: { gridColumn: 6, gridRow: 5 },
-  D3: { gridColumn: 7, gridRow: 5 },
-  G1: { gridColumn: 1, gridRow: 6 },
-  G2: { gridColumn: 1, gridRow: 7 },
-  E1: { gridColumn: 6, gridRow: 6 },
-  F1: { gridColumn: 6, gridRow: 7 },
-  H1: { gridColumn: 12, gridRow: 6 },
-  H2: { gridColumn: 12, gridRow: 7 }
+const screenRoutePresets: Array<{ value: ScreenRoutePreset; label: string }> = [
+  { value: "balanced", label: "Balanced" },
+  { value: "vj_takeover", label: "VJ Takeover" },
+  { value: "baofa_takeover", label: "Baofa Takeover" }
+];
+const screenOwners: Array<{ value: ScreenOwner; label: string }> = [
+  { value: "vj", label: "VJ" },
+  { value: "baofa", label: "Baofa" },
+  { value: "off", label: "Off" },
+  { value: "diagnostic", label: "Diag" }
+];
+
+type ScreenLayoutItem = {
+  id: string;
+  col: number;
+  row: number;
+  width?: number;
+  height?: number;
+  rotate?: number;
 };
-const screenLayoutOrder = Object.keys(screenLayout);
+
+const stageBounds = { width: 11, height: 6.4 };
+const screenLayoutItems: ScreenLayoutItem[] = [
+  { id: "A1", col: 5.5, row: 0.7, width: 3.9, height: 1.05 },
+  { id: "B1", col: 2.9, row: 1.75 },
+  { id: "B2", col: 3.95, row: 1.75 },
+  { id: "B3", col: 5.0, row: 1.75 },
+  { id: "B4", col: 6.05, row: 1.75 },
+  { id: "B5", col: 7.1, row: 1.75 },
+  { id: "B6", col: 8.15, row: 1.75 },
+  { id: "C1", col: 1.75, row: 2.55, rotate: -14 },
+  { id: "C2", col: 2.55, row: 2.35, rotate: -4 },
+  { id: "C3", col: 8.45, row: 2.35, rotate: 4 },
+  { id: "C4", col: 9.25, row: 2.55, rotate: 14 },
+  { id: "D1", col: 4.2, row: 3.35 },
+  { id: "D2", col: 5.5, row: 3.15 },
+  { id: "D3", col: 6.8, row: 3.35 },
+  { id: "E1", col: 5.5, row: 4.35, width: 1.15 },
+  { id: "F1", col: 5.5, row: 5.55, width: 1.2 },
+  { id: "G1", col: 0.95, row: 4.2, height: 0.82 },
+  { id: "G2", col: 0.95, row: 5.4, height: 0.82 },
+  { id: "H1", col: 10.05, row: 4.2, height: 0.82 },
+  { id: "H2", col: 10.05, row: 5.4, height: 0.82 }
+];
+const screenLayoutOrder = screenLayoutItems.map((screen) => screen.id);
+
+function Root() {
+  const screenId = getScreenIdFromPath();
+  if (screenId) return <ScreenGateway screenId={screenId} />;
+  return <App />;
+}
 
 function App() {
   const [snapshot, setSnapshot] = React.useState<PerformanceState | null>(null);
@@ -261,8 +290,7 @@ function App() {
       const alreadySelected = new Set(current.flatMap((group) => group.screenIds));
       const nextScreenIds = uniqueScreenIds.filter((screenId) => !alreadySelected.has(screenId));
       if (nextScreenIds.length === 0) return current;
-      const order = current.reduce((max, group) => Math.max(max, group.order), 0) + 1;
-      return [...current, { order, screenIds: nextScreenIds }];
+      return [...current, { order: current.length + 1, screenIds: nextScreenIds }];
     });
   }, []);
 
@@ -283,61 +311,56 @@ function App() {
   }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl]);
 
   const handleBoxPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (screenSelectionMode !== "box" || !screenGridRef.current) return;
-    event.preventDefault();
+    if (screenSelectionMode !== "box" || event.button !== 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const box = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
+    setDragBox(box);
     event.currentTarget.setPointerCapture(event.pointerId);
-    const rect = screenGridRef.current.getBoundingClientRect();
-    const point = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
-    setDragBox(point);
   }, [screenSelectionMode]);
 
   const handleBoxPointerMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (screenSelectionMode !== "box" || !screenGridRef.current || !dragBox) return;
-    const rect = screenGridRef.current.getBoundingClientRect();
+    if (!dragBox || screenSelectionMode !== "box") return;
+    const rect = event.currentTarget.getBoundingClientRect();
     const point = clampPoint(event.clientX - rect.left, event.clientY - rect.top, rect);
-    setDragBox((current) => current ? {
-      ...current,
-      currentX: point.currentX,
-      currentY: point.currentY
-    } : null);
+    setDragBox((current) => current ? { ...current, currentX: point.currentX, currentY: point.currentY } : current);
   }, [dragBox, screenSelectionMode]);
 
   const handleBoxPointerUp = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (screenSelectionMode !== "box" || !screenGridRef.current || !dragBox) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    const grid = screenGridRef.current;
-    const gridRect = grid.getBoundingClientRect();
+    if (!dragBox || screenSelectionMode !== "box" || !screenGridRef.current) return;
+    const gridRect = screenGridRef.current.getBoundingClientRect();
     const selectionRect = normalizeRect(dragBox);
-    const selectedScreens = Array.from(grid.querySelectorAll<HTMLButtonElement>("[data-screen-id]"))
+    const selectedScreenIds = Array.from(screenGridRef.current.querySelectorAll<HTMLButtonElement>("[data-screen-id]"))
       .filter((button) => {
-        const rect = button.getBoundingClientRect();
+        const buttonRect = button.getBoundingClientRect();
         return rectsIntersect(selectionRect, {
-          left: rect.left - gridRect.left,
-          top: rect.top - gridRect.top,
-          right: rect.right - gridRect.left,
-          bottom: rect.bottom - gridRect.top
+          left: buttonRect.left - gridRect.left,
+          right: buttonRect.right - gridRect.left,
+          top: buttonRect.top - gridRect.top,
+          bottom: buttonRect.bottom - gridRect.top
         });
       })
-      .map((button) => button.dataset.screenId || "")
-      .filter(Boolean);
-    addSequenceGroup(selectedScreens);
+      .map((button) => button.dataset.screenId)
+      .filter((screenId): screenId is string => Boolean(screenId));
+    addSequenceGroup(selectedScreenIds);
     setDragBox(null);
+    event.currentTarget.releasePointerCapture(event.pointerId);
   }, [addSequenceGroup, dragBox, screenSelectionMode]);
 
   const pulseSelectedScreens = React.useCallback(async () => {
-    const groups = sequenceGroups.length > 0
-      ? [...sequenceGroups].sort((a, b) => a.order - b.order)
-      : [{ order: 1, screenIds: [snapshot?.modules.interaction.screenId || "MASTER"] }];
+    if (sequenceGroups.length === 0 && snapshot) {
+      await sendControl("interaction", "pulseScreen", snapshot.modules.interaction.screenId, snapshot.modules.interaction.screenId);
+      return;
+    }
+
+    const groups = [...sequenceGroups].sort((a, b) => a.order - b.order);
     const sequenceDelay = stepDurationMs(sequenceStep, snapshot?.show.bpm || 120);
     for (const group of groups) {
       await Promise.all(group.screenIds.map((screenId) => sendControl("interaction", "pulseScreen", screenId, screenId)));
       if (groups.length > 1) await wait(sequenceDelay);
     }
-  }, [sendControl, sequenceGroups, sequenceStep, snapshot?.modules.interaction.screenId, snapshot?.show.bpm]);
+  }, [sendControl, sequenceGroups, sequenceStep, snapshot]);
 
-  const setInteractionMode = React.useCallback(async (mode: string) => {
+  const triggerInteractionMode = React.useCallback(async (mode: string) => {
     if (sequenceGroups.length === 0) {
       await sendControl("interaction", "setMode", "interaction-mode", mode);
       return;
@@ -366,6 +389,13 @@ function App() {
   const clients = Object.values(snapshot.clients);
   const audioSources = Object.values(snapshot.audioSources).sort((a, b) => b.level - a.level);
   const activeSource = snapshot.audioSources[snapshot.modules.audio.activeSourceId] || audioSources[0];
+  const screenTopology = normalizeScreenTopology(snapshot.modules.interaction.screenTopology);
+  const screenRoutes = snapshot.modules.interaction.screenRoutes || {};
+  const screenPresentation = snapshot.modules.interaction.screenPresentation || {
+    autoRedirect: true,
+    showDebug: false,
+    showMenu: false
+  };
 
   return (
     <main className="app-shell">
@@ -517,6 +547,13 @@ function App() {
                   {scene}
                 </button>
               ))}
+              <button
+                type="button"
+                className={snapshot.modules.visual.fullscreen ? "selected" : ""}
+                onClick={() => sendControl("visual", "setFullscreen", "visual-fullscreen", !snapshot.modules.visual.fullscreen)}
+              >
+                Fullscreen
+              </button>
             </div>
 
             <form className="inline-form" onSubmit={(event) => {
@@ -530,6 +567,43 @@ function App() {
           </Panel>
 
           <Panel id="interaction" title="Multi-screen Interaction" icon={<MonitorCog size={18} />}>
+            <div className="route-presets" aria-label="Screen route presets">
+              {screenRoutePresets.map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  className={snapshot.modules.interaction.screenRoutePreset === preset.value ? "selected" : ""}
+                  onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="screen-presentation-controls" aria-label="Screen presentation">
+              <button
+                type="button"
+                className={screenPresentation.autoRedirect ? "selected" : ""}
+                onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
+              >
+                Auto redirect
+              </button>
+              <button
+                type="button"
+                className={screenPresentation.showMenu ? "selected" : ""}
+                onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
+              >
+                Show menus
+              </button>
+              <button
+                type="button"
+                className={screenPresentation.showDebug ? "selected" : ""}
+                onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
+              >
+                Show debug
+              </button>
+            </div>
+
             <div className="screen-tools">
               {screenSelectionModes.map((mode) => (
                 <button
@@ -549,36 +623,41 @@ function App() {
                 <button type="button" onClick={clearSequence}>清除顺序</button>
               )}
             </div>
+
             <div
               className={`screen-grid selection-mode-${screenSelectionMode}`}
+              aria-label="Physical screen layout"
               ref={screenGridRef}
               onPointerDown={handleBoxPointerDown}
               onPointerMove={handleBoxPointerMove}
               onPointerUp={handleBoxPointerUp}
               onPointerCancel={() => setDragBox(null)}
             >
-              <button
-                type="button"
-                className={snapshot.modules.interaction.screenId === "MASTER" ? "selected master-screen" : "master-screen"}
-                onClick={() => sendControl("interaction", "setScreen", "MASTER", "MASTER")}
-              >
-                MASTER
-              </button>
-              {screenLayoutOrder.map((screenId) => (
-                <button
-                  key={screenId}
-                  type="button"
-                  data-screen-id={screenId}
-                  className={screenButtonClassName(screenId, snapshot.modules.interaction.screenId, sequenceOrderByScreen)}
-                  style={screenLayout[screenId]}
-                  onClick={() => handleScreenSelect(screenId)}
-                >
-                  {screenId}
-                  {sequenceOrderByScreen.has(screenId) && (
-                    <span className="screen-order">{sequenceOrderByScreen.get(screenId)}</span>
-                  )}
-                </button>
-              ))}
+              {screenLayoutItems.map((screen) => {
+                const route = screenRoutes[screen.id];
+                return (
+                  <button
+                    key={screen.id}
+                    type="button"
+                    data-screen-id={screen.id}
+                    className={[
+                      snapshot.modules.interaction.screenId === screen.id ? "selected" : "",
+                      sequenceOrderByScreen.has(screen.id) ? "sequenced" : "",
+                      screen.id === "A1" ? "master-screen" : "",
+                      route?.owner ? `owner-${route.owner}` : ""
+                    ].filter(Boolean).join(" ")}
+                    style={getScreenLayoutStyle(screen)}
+                    onClick={() => handleScreenSelect(screen.id)}
+                    title={route?.url || route?.owner || screen.id}
+                  >
+                    <strong>{screen.id}</strong>
+                    <span>{formatOwner(route?.owner)}</span>
+                    {sequenceOrderByScreen.has(screen.id) && (
+                      <em className="screen-order">{sequenceOrderByScreen.get(screen.id)}</em>
+                    )}
+                  </button>
+                );
+              })}
               {dragBox && (
                 <span className="selection-box" style={dragBoxStyle(dragBox)} />
               )}
@@ -588,6 +667,10 @@ function App() {
               <span>Intensity {Math.round(snapshot.modules.interaction.intensity * 100)}%</span>
               <span>Growth {Math.round(snapshot.modules.interaction.treeGrowth * 100)}%</span>
               <span>{snapshot.modules.interaction.gestureActive ? "gesture active" : "gesture idle"}</span>
+              <span>Route {snapshot.modules.interaction.screenRoutePreset}</span>
+              <span>{screenPresentation.autoRedirect ? "auto redirect" : "manual routing"}</span>
+              <span>{screenPresentation.showMenu ? "menus shown" : "menus hidden"}</span>
+              <span>{screenPresentation.showDebug ? "debug shown" : "debug hidden"}</span>
             </div>
 
             {sequenceGroups.length > 0 && (
@@ -613,7 +696,7 @@ function App() {
                   key={mode}
                   type="button"
                   className={snapshot.modules.interaction.mode === mode ? "selected" : ""}
-                  onClick={() => void setInteractionMode(mode)}
+                  onClick={() => triggerInteractionMode(mode)}
                 >
                   {mode}
                 </button>
@@ -627,6 +710,45 @@ function App() {
               }}>
                 Reset tree
               </button>
+              <button
+                type="button"
+                className={snapshot.modules.interaction.visualMode === "firework" ? "selected" : ""}
+                onClick={() => sendControl(
+                  "interaction",
+                  "setVisualMode",
+                  "visual-mode",
+                  snapshot.modules.interaction.visualMode === "firework" ? "tree" : "firework"
+                )}
+              >
+                <Sparkles size={15} /> {snapshot.modules.interaction.visualMode === "firework" ? "Firework" : "Tree"}
+              </button>
+            </div>
+
+            <div className="route-table">
+              {screenTopology.flatMap((row) => row).filter(Boolean).map((screenId) => {
+                const route = screenRoutes[screenId];
+                return (
+                  <article key={screenId}>
+                    <div>
+                      <strong>{screenId}</strong>
+                      <span>{route?.url || "4300 local status"}</span>
+                      <small>{route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"}</small>
+                    </div>
+                    <div className="owner-switch" aria-label={`${screenId} owner`}>
+                      {screenOwners.map((owner) => (
+                        <button
+                          key={owner.value}
+                          type="button"
+                          className={route?.owner === owner.value ? `selected owner-${owner.value}` : ""}
+                          onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
+                        >
+                          {owner.label}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </Panel>
 
@@ -655,6 +777,127 @@ function App() {
             </div>
           </Panel>
         </section>
+      </section>
+    </main>
+  );
+}
+
+function ScreenGateway({ screenId }: { screenId: string }) {
+  const [snapshot, setSnapshot] = React.useState<PerformanceState | null>(null);
+  const [connection, setConnection] = React.useState<ConnectionState>("connecting");
+  const [message, setMessage] = React.useState("Resolving route");
+  const route = snapshot?.modules.interaction.screenRoutes?.[screenId];
+  const screenPresentation = snapshot?.modules.interaction.screenPresentation || {
+    autoRedirect: true,
+    showDebug: false,
+    showMenu: false
+  };
+  const isValidScreen = Boolean(route);
+
+  React.useEffect(() => {
+    let closed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+
+    async function boot() {
+      try {
+        const state = await fetchJson<PerformanceState>("/api/state");
+        if (!closed) setSnapshot(state);
+      } catch {
+        if (!closed) {
+          setConnection("offline");
+          setMessage("4300 API unavailable");
+        }
+      }
+      connect();
+    }
+
+    function connect() {
+      if (closed) return;
+      setConnection("connecting");
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+      socket.addEventListener("open", () => {
+        setConnection("connected");
+        socket?.send(JSON.stringify({
+          type: "client.hello",
+          clientId: `screen-gateway-${screenId}`,
+          module: "dashboard",
+          role: "screen-gateway",
+          capabilities: ["state.read", "screen.route"]
+        }));
+      });
+      socket.addEventListener("message", (event) => {
+        const serverMessage = JSON.parse(event.data) as ServerMessage;
+        if (isStateSnapshot(serverMessage)) setSnapshot(serverMessage.state);
+        if (isStatePatch(serverMessage)) {
+          setSnapshot((current) => serverMessage.state || (current ? applyStatePatch(current, serverMessage) : current));
+        }
+      });
+      socket.addEventListener("close", () => {
+        if (closed) return;
+        setConnection("offline");
+        reconnectTimer = window.setTimeout(connect, 1200);
+      });
+    }
+
+    void boot();
+    return () => {
+      closed = true;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, [screenId]);
+
+  React.useEffect(() => {
+    if (!snapshot) return;
+    if (!route) {
+      setMessage(`Unknown screen ${screenId}`);
+      return;
+    }
+    if (!screenPresentation.autoRedirect) {
+      setMessage(`Manual routing hold for ${formatOwner(route.owner)}`);
+      return;
+    }
+    if ((route.owner === "vj" || route.owner === "baofa") && route.url) {
+      setMessage(`Routing ${screenId} to ${formatOwner(route.owner)}`);
+      window.location.replace(route.url);
+      return;
+    }
+    setMessage(route.owner === "diagnostic" ? "Diagnostic hold" : "Screen is off");
+  }, [route, screenId, screenPresentation.autoRedirect, snapshot]);
+
+  return (
+    <main className="screen-gateway">
+      <section>
+        <div className={`connection-dot ${connection}`} />
+        <span>{connection}</span>
+        <h1>{screenId}</h1>
+        <p>{message}</p>
+        {isValidScreen && route && (
+          <dl>
+            <div>
+              <dt>Owner</dt>
+              <dd>{formatOwner(route.owner)}</dd>
+            </div>
+            <div>
+              <dt>URL</dt>
+              <dd>{route.url || "4300 local status"}</dd>
+            </div>
+            <div>
+              <dt>Auto Redirect</dt>
+              <dd>{screenPresentation.autoRedirect ? "enabled" : "disabled"}</dd>
+            </div>
+            <div>
+              <dt>Menus / Debug</dt>
+              <dd>{screenPresentation.showMenu ? "menus shown" : "menus hidden"} · {screenPresentation.showDebug ? "debug shown" : "debug hidden"}</dd>
+            </div>
+            <div>
+              <dt>Updated</dt>
+              <dd>{new Date(route.updatedAt).toLocaleTimeString()}</dd>
+            </div>
+          </dl>
+        )}
       </section>
     </main>
   );
@@ -753,6 +996,36 @@ function formatMs(value: number) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function formatOwner(owner: unknown) {
+  if (owner === "vj") return "VJ";
+  if (owner === "baofa") return "Baofa";
+  if (owner === "off") return "Off";
+  if (owner === "diagnostic") return "Diag";
+  return "Unset";
+}
+
+function getScreenLayoutStyle(item: ScreenLayoutItem): React.CSSProperties {
+  const width = item.width ?? 0.78;
+  const height = item.height ?? 0.52;
+  return {
+    left: `${((item.col - width / 2) / stageBounds.width) * 100}%`,
+    top: `${((item.row - height / 2) / stageBounds.height) * 100}%`,
+    width: `${(width / stageBounds.width) * 100}%`,
+    height: `${(height / stageBounds.height) * 100}%`,
+    transform: item.rotate ? `rotate(${item.rotate}deg)` : undefined
+  };
+}
+
+function getScreenIdFromPath() {
+  const match = window.location.pathname.match(/^\/screen\/([^/]+)\/?$/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]).trim().toUpperCase();
+  } catch {
+    return match[1].trim().toUpperCase();
+  }
+}
+
 function normalizeScreenTopology(value: unknown): string[][] {
   if (!Array.isArray(value)) return [];
   if (value.every((row) => Array.isArray(row))) {
@@ -767,13 +1040,6 @@ function normalizeScreenTopology(value: unknown): string[][] {
     return rows;
   }
   return [];
-}
-
-function screenButtonClassName(screenId: string, activeScreenId: string, sequenceOrderByScreen: Map<string, number>) {
-  return [
-    activeScreenId === screenId ? "selected" : "",
-    sequenceOrderByScreen.has(screenId) ? "sequenced" : ""
-  ].filter(Boolean).join(" ");
 }
 
 function normalizeRect(box: DragBox) {
@@ -833,6 +1099,6 @@ function stepDurationMs(step: SequenceStep, bpm: number) {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <Root />
   </React.StrictMode>
 );

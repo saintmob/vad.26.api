@@ -139,10 +139,16 @@ function createDefaultInteractionModule(): InteractionModuleState {
     screenRegistry: createDefaultScreenRegistry(),
     screenRoutes: createScreenRoutesForPreset("balanced", now),
     screenRoutePreset: "balanced",
+    screenPresentation: {
+      autoRedirect: true,
+      showDebug: false,
+      showMenu: false
+    },
     screenId: "C2",
     role: "screen",
     overview: false,
     mode: "idle",
+    visualMode: "tree",
     intensity: 0.08,
     treeGrowth: 0,
     gestureActive: false,
@@ -240,7 +246,22 @@ export function normalizeControlCommand(input: unknown): ControlCommand {
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx"].includes(command)) return "visual";
-  if (["setInteractionMode", "setMode", "setIntensity", "resetTree", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "setOperationLock"].includes(command)) return "interaction";
+  if ([
+    "setInteractionMode",
+    "setMode",
+    "setIntensity",
+    "resetTree",
+    "setVisualMode",
+    "pulseScreen",
+    "setScreen",
+    "setScreenOwner",
+    "setScreenRoutePreset",
+    "setScreenAutoRedirect",
+    "setScreenDebugVisible",
+    "setScreenMenuVisible",
+    "setScreenPresentation",
+    "setOperationLock"
+  ].includes(command)) return "interaction";
   if (["play", "pause", "reset", "setBpm", "seek"].includes(command)) return "show";
   if (command === "focusVideo") return "video";
   if (command === "setGuestOnStage") return "guest";
@@ -291,6 +312,7 @@ export class ShowStateStore {
         this.state.modules.interaction.screenRoutePreset = patchedPreset;
         this.state.modules.interaction.screenRoutes = createScreenRoutesForPreset(patchedPreset, Date.now());
       }
+      this.state.modules.interaction.screenPresentation = normalizeScreenPresentation(this.state.modules.interaction.screenPresentation);
       this.state.modules.interaction.screenRoutes = normalizeScreenRoutes(
         this.state.modules.interaction.screenRoutes,
         this.state.modules.interaction.screenRoutePreset
@@ -462,6 +484,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     }
     if (["setInteractionMode", "setMode"].includes(command.command)) {
       state.modules.interaction.mode = String(value || command.target) as InteractionModuleState["mode"];
+      state.modules.interaction.visualMode = "tree";
     }
     if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value, state.modules.interaction.intensity);
     if (command.command === "resetTree") {
@@ -470,12 +493,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.modules.interaction.mode = "idle";
       state.modules.interaction.intensity = 0.08;
     }
+    if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
+      state.modules.interaction.visualMode = String(value) as InteractionModuleState["visualMode"];
+    }
     if (command.command === "pulseScreen") {
       state.modules.interaction.screenPulse = { source: String(value || command.target), timestamp: Date.now() };
     }
     if (command.command === "setScreen") {
       state.modules.interaction.screenId = String(value || command.target);
-      state.modules.interaction.role = state.modules.interaction.screenId === "MASTER" ? "master" : "screen";
+      state.modules.interaction.role = ["MASTER", "A1"].includes(state.modules.interaction.screenId) ? "master" : "screen";
     }
     if (command.command === "setScreenOwner") {
       const screenId = String(command.target || "");
@@ -491,6 +517,21 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
         state.modules.interaction.screenRoutePreset = preset;
         state.modules.interaction.screenRoutes = createScreenRoutesForPreset(preset, Date.now());
       }
+    }
+    if (command.command === "setScreenAutoRedirect") {
+      state.modules.interaction.screenPresentation.autoRedirect = Boolean(value);
+    }
+    if (command.command === "setScreenDebugVisible") {
+      state.modules.interaction.screenPresentation.showDebug = Boolean(value);
+    }
+    if (command.command === "setScreenMenuVisible") {
+      state.modules.interaction.screenPresentation.showMenu = Boolean(value);
+    }
+    if (command.command === "setScreenPresentation" && isRecord(value)) {
+      state.modules.interaction.screenPresentation = normalizeScreenPresentation({
+        ...state.modules.interaction.screenPresentation,
+        ...value
+      });
     }
   }
 
@@ -512,6 +553,10 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
   state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
+  state.modules.interaction.screenPresentation = normalizeScreenPresentation(state.modules.interaction.screenPresentation);
+  state.modules.interaction.visualMode = ["tree", "firework"].includes(String(state.modules.interaction.visualMode))
+    ? state.modules.interaction.visualMode
+    : "tree";
   state.modules.interaction.screenRoutes = normalizeScreenRoutes(
     state.modules.interaction.screenRoutes,
     state.modules.interaction.screenRoutePreset
@@ -552,6 +597,15 @@ function nextLockedModules(current: ModuleName[], target: string, value: unknown
   }
 
   return [...lockedModules];
+}
+
+function normalizeScreenPresentation(value: unknown): InteractionModuleState["screenPresentation"] {
+  const record = isRecord(value) ? value : {};
+  return {
+    autoRedirect: typeof record.autoRedirect === "boolean" ? record.autoRedirect : true,
+    showDebug: typeof record.showDebug === "boolean" ? record.showDebug : false,
+    showMenu: typeof record.showMenu === "boolean" ? record.showMenu : false
+  };
 }
 
 function createDefaultScreenRegistry() {
@@ -642,16 +696,20 @@ function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
 function normalizeScreenTopology(value: unknown): string[][] {
   if (!Array.isArray(value)) return SCREEN_TOPOLOGY;
   if (value.every((row) => Array.isArray(row))) {
+    const rawScreens = value.flat().map((screenId) => String(screenId || "").trim());
+    if (hasLegacySideScreenIds(rawScreens)) return SCREEN_TOPOLOGY;
     const rows = value
-      .map((row) => row.map((screenId) => String(screenId || "")))
+      .map((row) => row
+        .map((screenId) => String(screenId || "").trim())
+        .filter((screenId) => (SCREEN_IDS as readonly string[]).includes(screenId)))
       .filter((row) => row.length > 0);
-    if (hasLegacySideScreenIds(rows.flat())) return SCREEN_TOPOLOGY;
     return rows.length > 0 ? rows : SCREEN_TOPOLOGY;
   }
   if (value.every((screenId) => typeof screenId === "string")) {
-    const screens = value.map((screenId) => screenId.trim()).filter(Boolean);
+    const rawScreens = value.map((screenId) => screenId.trim());
+    if (hasLegacySideScreenIds(rawScreens)) return SCREEN_TOPOLOGY;
+    const screens = rawScreens.filter((screenId) => (SCREEN_IDS as readonly string[]).includes(screenId));
     if (screens.length === 0) return SCREEN_TOPOLOGY;
-    if (hasLegacySideScreenIds(screens)) return SCREEN_TOPOLOGY;
     const rows: string[][] = [];
     for (let index = 0; index < screens.length; index += 6) {
       rows.push(screens.slice(index, index + 6));

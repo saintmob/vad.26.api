@@ -132,10 +132,16 @@ export interface InteractionModuleState {
   screenRegistry: ScreenRegistryEntry[];
   screenRoutes: Record<string, ScreenRouteEntry>;
   screenRoutePreset: ScreenRoutePreset;
+  screenPresentation: {
+    autoRedirect: boolean;
+    showDebug: boolean;
+    showMenu: boolean;
+  };
   screenId: string;
   role: "screen" | "master";
   overview: boolean;
   mode: "idle" | "interaction" | "flow" | "climax";
+  visualMode: "tree" | "firework";
   intensity: number;
   treeGrowth: number;
   gestureActive: boolean;

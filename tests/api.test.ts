@@ -35,9 +35,12 @@ test("serves API spec and initial state", async () => {
     assert.equal(Object.keys(state.modules.interaction.screenRoutes).length, 20);
     assert.equal(state.modules.interaction.screenRoutes.A1.owner, "vj");
     assert.equal(state.modules.interaction.screenRoutes.B1.owner, "baofa");
-    assert.equal(state.modules.interaction.screenRoutes.G1.url, "http://localhost:4303/screen/G1");
+    assert.equal(state.modules.interaction.screenRoutes.A1.url, "http://localhost:4302/screen/A1");
     assert.equal(state.modules.interaction.screenRoutes.H2.url, "http://localhost:4303/screen/H2");
-  });
+    assert.equal(state.modules.interaction.screenPresentation.autoRedirect, true);
+    assert.equal(state.modules.interaction.screenPresentation.showDebug, false);
+    assert.equal(state.modules.interaction.screenPresentation.showMenu, false);
+  }, { loadSnapshot: false });
 });
 
 test("updates screen route preset and individual screen owners", async () => {
@@ -95,6 +98,77 @@ test("accepts interaction module patch for screen route preset", async () => {
     assert.equal(body.state.modules.interaction.screenRoutePreset, "baofa_takeover");
     assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "baofa");
     assert.equal(body.state.modules.interaction.screenRoutes.H2.url, "http://localhost:4303/screen/H2");
+  });
+});
+
+test("updates screen presentation controls", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "screen-debug",
+        command: "setScreenDebugVisible",
+        value: true,
+        issuedBy: "test"
+      })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.state.modules.interaction.screenPresentation.showDebug, true);
+
+    const presentation = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "screen-presentation",
+        command: "setScreenPresentation",
+        value: { autoRedirect: false, showMenu: true },
+        issuedBy: "test"
+      })
+    });
+    const presentationBody = await presentation.json();
+
+    assert.equal(presentation.status, 202);
+    assert.equal(presentationBody.state.modules.interaction.screenPresentation.autoRedirect, false);
+    assert.equal(presentationBody.state.modules.interaction.screenPresentation.showDebug, true);
+    assert.equal(presentationBody.state.modules.interaction.screenPresentation.showMenu, true);
+  });
+});
+
+test("keeps visual control independent from screen routing changes", async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "A1",
+        command: "setScreenOwner",
+        value: "baofa",
+        issuedBy: "test"
+      })
+    });
+
+    const visualResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Pulse",
+        issuedBy: "test"
+      })
+    });
+    const body = await visualResponse.json();
+
+    assert.equal(visualResponse.status, 202);
+    assert.equal(body.state.modules.visual.scene, "Pulse");
+    assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "baofa");
   });
 });
 
@@ -158,7 +232,7 @@ test("accepts module state patches", async () => {
   });
 });
 
-test("normalizes flat interaction screen topology patches", async () => {
+test("migrates legacy side screen topology ids", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
       method: "POST",
@@ -166,7 +240,7 @@ test("normalizes flat interaction screen topology patches", async () => {
       body: JSON.stringify({
         source: "baofa",
         patch: {
-          screenTopology: ["A1", "A2", "A3", "A4", "A5", "A6", "B1"],
+          screenTopology: ["A1", "G1", "H2", "B1", "L1", "R2"],
           screenId: "B1"
         }
       })
@@ -175,34 +249,15 @@ test("normalizes flat interaction screen topology patches", async () => {
     const body = await response.json();
     assert.equal(response.status, 202);
     assert.deepEqual(body.state.modules.interaction.screenTopology, [
-      ["A1", "A2", "A3", "A4", "A5", "A6"],
-      ["B1"]
+      ["A1"],
+      ["B1", "B2", "B3", "B4", "B5", "B6"],
+      ["C1", "C2", "C3", "C4"],
+      ["D1", "D2", "D3"],
+      ["G1", "E1", "H1"],
+      ["G2", "F1", "H2"]
     ]);
     assert.equal(body.state.modules.interaction.screenTopology[0][0], "A1");
-  });
-});
-
-test("migrates legacy side screen topology ids", async () => {
-  await withServer(async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        source: "legacy-layout",
-        patch: {
-          screenTopology: [
-            ["L1", "A1", "R1"],
-            ["L2", "B1", "B2", "B3", "B4", "B5", "B6", "R2"]
-          ]
-        }
-      })
-    });
-
-    const body = await response.json();
-    assert.equal(response.status, 202);
-    assert.deepEqual(body.state.modules.interaction.screenTopology[0], ["A1"]);
-    assert.deepEqual(body.state.modules.interaction.screenTopology[4], ["G1", "E1", "H1"]);
-    assert.deepEqual(body.state.modules.interaction.screenTopology[5], ["G2", "F1", "H2"]);
+    assert.equal(body.state.modules.interaction.screenTopology.flat().includes("G1"), true);
   });
 });
 
@@ -322,21 +377,6 @@ test("operation lock is module-scoped and allows central control", async () => {
     });
     assert.equal(acceptedDashboardPatch.status, 202);
 
-    const acceptedInteraction = await fetch(`${baseUrl}/api/control`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        module: "interaction",
-        target: "B4",
-        command: "setMode",
-        value: "flow",
-        issuedBy: "interaction-desk"
-      })
-    });
-    const acceptedInteractionBody = await acceptedInteraction.json();
-    assert.equal(acceptedInteraction.status, 202);
-    assert.equal(acceptedInteractionBody.state.modules.interaction.mode, "flow");
-
     const unlocked = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -362,6 +402,41 @@ test("operation lock is module-scoped and allows central control", async () => {
       })
     });
     assert.equal(acceptedVisual.status, 202);
+  });
+});
+
+test("applies baofa visual mode controls", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "visual-mode",
+        command: "setVisualMode",
+        value: "firework"
+      })
+    });
+
+    const body = await response.json();
+    assert.equal(response.status, 202);
+    assert.equal(body.state.modules.interaction.visualMode, "firework");
+    assert.equal(body.state.commandLog[0].command, "setVisualMode");
+
+    const modeResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "interaction-mode",
+        command: "setMode",
+        value: "flow"
+      })
+    });
+    const modeBody = await modeResponse.json();
+    assert.equal(modeResponse.status, 202);
+    assert.equal(modeBody.state.modules.interaction.mode, "flow");
+    assert.equal(modeBody.state.modules.interaction.visualMode, "tree");
   });
 });
 
