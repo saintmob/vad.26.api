@@ -13,6 +13,7 @@ import {
   isModuleName,
   normalizeAudioFrame,
   normalizeControlCommand,
+  resolveStateScreenRoutes,
   ShowStateStore
 } from "./state.js";
 import { ClientHelloMessage, JsonRecord, PerformanceState } from "./types.js";
@@ -36,6 +37,42 @@ function getLanAddresses(port: number) {
   }
 
   return [...addresses];
+}
+
+function getHeaderValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeConfiguredOrigin(value: unknown) {
+  const input = String(value || "").trim();
+  if (!input) return null;
+  try {
+    const url = new URL(input);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return null;
+  }
+}
+
+function resolveRequestOrigin(headers: http.IncomingHttpHeaders, secure = false) {
+  const configuredOrigin = normalizeConfiguredOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
+  if (configuredOrigin) return configuredOrigin;
+
+  const forwardedProto = String(getHeaderValue(headers["x-forwarded-proto"]) || "").split(",")[0].trim().toLowerCase();
+  const forwardedHost = String(getHeaderValue(headers["x-forwarded-host"]) || "").split(",")[0].trim();
+  const host = forwardedHost || getHeaderValue(headers.host) || `localhost:${SHOW_CONTROL_PORT}`;
+  const protocol = forwardedProto === "https" || secure ? "https:" : "http:";
+  try {
+    const url = new URL(`${protocol}//${host}`);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return `${protocol}//localhost:${SHOW_CONTROL_PORT}`;
+  }
+}
+
+function resolveStateForRequest(state: PerformanceState, origin: string) {
+  return resolveStateScreenRoutes(state, origin);
 }
 
 export interface CreateServerOptions {
@@ -66,6 +103,8 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     || createDefaultState();
   const store = new ShowStateStore(initialState);
   const hub = new RealtimeHub();
+  const socketOrigins = new WeakMap<WebSocket, string>();
+  const sseOrigins = new WeakMap<Response, string>();
   const snapshotWriter = options.persist === false ? null : new SnapshotWriter(snapshotPath);
   const app = express();
   const server = http.createServer(app);
@@ -123,31 +162,36 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     });
   });
 
-  app.get("/api/state", (_req, res) => {
-    res.json(store.getState());
+  app.get("/api/state", (req, res) => {
+    const origin = resolveRequestOrigin(req.headers, req.secure);
+    res.json(resolveStateForRequest(store.getState(), origin));
   });
 
-  app.get("/api/events", (_req, res) => {
+  app.get("/api/events", (req, res) => {
+    const origin = resolveRequestOrigin(req.headers, req.secure);
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache",
       connection: "keep-alive",
       "access-control-allow-origin": "*"
     });
+    sseOrigins.set(res, origin);
     hub.addSse(res);
     res.write("event: state.snapshot\n");
-    res.write(`data: ${JSON.stringify({ type: "state.snapshot", state: store.getState() })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin) })}\n\n`);
   });
 
   app.post("/api/mixer/frame", requireToken(options), (req, res) => {
+    const origin = resolveRequestOrigin(req.headers, req.secure);
     const frame = normalizeAudioFrame(req.body);
     store.applyAudioFrame(frame);
     snapshotWriter?.schedule(store.getState());
     hub.broadcast(frame);
-    res.status(202).json({ ok: true, frame, state: store.getState() });
+    res.status(202).json({ ok: true, frame, state: resolveStateForRequest(store.getState(), origin) });
   });
 
   app.post("/api/modules/:module/state", requireToken(options), (req, res) => {
+    const origin = resolveRequestOrigin(req.headers, req.secure);
     const moduleName = req.params.module;
     if (!isModuleName(moduleName)) {
       res.status(400).json({ ok: false, error: "module must be audio, visual, or interaction" });
@@ -165,10 +209,11 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     store.applyModulePatch(moduleName, patch, String(req.body.source || "rest"));
     snapshotWriter?.schedule(store.getState());
     hub.broadcast({ type: "state.patch", module: moduleName, patch, updatedAt: store.getState().updatedAt });
-    res.status(202).json({ ok: true, module: moduleName, patch, state: store.getState() });
+    res.status(202).json({ ok: true, module: moduleName, patch, state: resolveStateForRequest(store.getState(), origin) });
   });
 
   app.post("/api/control", requireToken(options), (req, res) => {
+    const origin = resolveRequestOrigin(req.headers, req.secure);
     const command = normalizeControlCommand(req.body);
     if (!store.canApplyControlCommand(command)) {
       res.status(423).json({ ok: false, error: "Operation lock active", state: store.getState() });
@@ -179,31 +224,33 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     const ack = { type: "control.ack", ok: true, command };
     hub.broadcast(command);
     hub.broadcast(ack);
-    broadcastSnapshot(hub, store);
-    res.status(202).json({ ok: true, command, state: store.getState() });
+    broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
+    res.status(202).json({ ok: true, command, state: resolveStateForRequest(store.getState(), origin) });
   });
 
   app.post("/api/show/reset", requireToken(options), (_req, res) => {
+    const origin = resolveRequestOrigin(_req.headers, _req.secure);
     store.reset("rest");
     snapshotWriter?.schedule(store.getState());
-    broadcastSnapshot(hub, store);
-    res.status(202).json({ ok: true, state: store.getState() });
+    broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
+    res.status(202).json({ ok: true, state: resolveStateForRequest(store.getState(), origin) });
   });
 
   app.post("/api/show/snapshot", requireToken(options), async (_req, res, next) => {
     try {
+      const origin = resolveRequestOrigin(_req.headers, _req.secure);
       if (!snapshotWriter) {
-        res.status(202).json({ ok: true, persisted: false, state: store.getState() });
+        res.status(202).json({ ok: true, persisted: false, state: resolveStateForRequest(store.getState(), origin) });
         return;
       }
       await snapshotWriter.flush(store.getState());
-      res.status(202).json({ ok: true, persisted: true, state: store.getState() });
+      res.status(202).json({ ok: true, persisted: true, state: resolveStateForRequest(store.getState(), origin) });
     } catch (error) {
       next(error);
     }
   });
 
-  attachWebSocket(server, hub, store, snapshotWriter, options);
+  attachWebSocket(server, hub, store, snapshotWriter, options, socketOrigins, sseOrigins);
 
   if (options.serveClient) {
     addClientRoutes(app);
@@ -228,7 +275,9 @@ function attachWebSocket(
   hub: RealtimeHub,
   store: ShowStateStore,
   snapshotWriter: SnapshotWriter | null,
-  options: CreateServerOptions
+  options: CreateServerOptions,
+  socketOrigins: WeakMap<WebSocket, string>,
+  sseOrigins: WeakMap<Response, string>
 ) {
   const wss = new WebSocketServer({ noServer: true });
   server.on("close", () => {
@@ -249,9 +298,11 @@ function attachWebSocket(
 
   wss.on("connection", (socket: WebSocket, _req: http.IncomingMessage, queryToken?: string) => {
     const fallbackClientId = `ws-${crypto.randomUUID()}`;
+    const origin = resolveRequestOrigin(_req.headers, Boolean(((_req.socket as unknown as { encrypted?: boolean }) || {}).encrypted));
     let clientId: string | null = null;
+    socketOrigins.set(socket, origin);
     hub.addSocket(socket);
-    hub.send(socket, { type: "state.snapshot", state: store.getState() });
+    hub.send(socket, { type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin) });
 
     socket.on("message", (raw) => {
       try {
@@ -268,7 +319,7 @@ function attachWebSocket(
       if (client) {
         snapshotWriter?.schedule(store.getState());
         hub.broadcast({ type: "client.presence", client, clients: store.getState().clients });
-        broadcastSnapshot(hub, store);
+        broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
       }
     });
 
@@ -276,7 +327,7 @@ function attachWebSocket(
       if (typeof message.type !== "string") throw new Error("WebSocket message.type is required");
 
       if (message.type === "ui.subscribe") {
-        hub.send(socket, { type: "state.snapshot", state: store.getState() });
+        hub.send(socket, { type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin) });
         return;
       }
 
@@ -285,7 +336,7 @@ function attachWebSocket(
         clientId = client.id;
         snapshotWriter?.schedule(store.getState());
         hub.broadcast({ type: "client.presence", client, clients: store.getState().clients });
-        hub.send(socket, { type: "state.snapshot", state: store.getState() });
+        hub.send(socket, { type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin) });
         return;
       }
 
@@ -339,7 +390,7 @@ function attachWebSocket(
         snapshotWriter?.schedule(store.getState());
         hub.broadcast(command);
         hub.broadcast({ type: "control.ack", ok: true, command });
-        broadcastSnapshot(hub, store);
+        broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
         return;
       }
 
@@ -378,8 +429,22 @@ function messageHasToken(message: JsonRecord, queryToken: string | undefined, op
   return message.token === requiredToken || message.authToken === requiredToken || queryToken === requiredToken;
 }
 
-function broadcastSnapshot(hub: RealtimeHub, store: ShowStateStore) {
-  hub.broadcast({ type: "state.snapshot", state: store.getState() });
+function broadcastSnapshot(
+  hub: RealtimeHub,
+  store: ShowStateStore,
+  origin: string,
+  socketOrigins: WeakMap<WebSocket, string>,
+  sseOrigins: WeakMap<Response, string>
+) {
+  hub.forEachSocket((socket) => {
+    const socketOrigin = socketOrigins.get(socket) || origin;
+    hub.send(socket, { type: "state.snapshot", state: resolveStateForRequest(store.getState(), socketOrigin) });
+  });
+  hub.forEachSseClient((client) => {
+    const clientOrigin = sseOrigins.get(client) || origin;
+    client.write("event: state.snapshot\n");
+    client.write(`data: ${JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), clientOrigin) })}\n\n`);
+  });
 }
 
 function isRecord(value: unknown): value is JsonRecord {

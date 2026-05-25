@@ -1,4 +1,5 @@
 import type { ControlCommand, EventLogItem, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
+import { createIdFragment } from "./id";
 
 type ConnectionState = "connecting" | "connected" | "offline";
 
@@ -15,6 +16,7 @@ type ClientInfo = PerformanceState["clients"][string];
 
 const env = (import.meta as any).env || {};
 const databaseUrl = String(env.VITE_FIREBASE_DATABASE_URL || "").replace(/\/$/, "");
+const lanHost = String(env.VITE_LAN_HOST || env.SHOW_LAN_HOST || "").trim();
 
 export const firebaseShowId = env.VITE_SHOW_ID || "show-main";
 
@@ -25,6 +27,18 @@ export function shouldUseFirebaseRealtime() {
   if (transport === "firebase") return true;
   if (transport === "websocket") return false;
   return isFirebaseRealtimeConfigured && window.location.hostname.endsWith("vercel.app");
+}
+
+function getBrowserHost() {
+  return typeof window !== "undefined" && window.location.hostname ? window.location.hostname : "localhost";
+}
+
+function getBrowserProtocol() {
+  return typeof window !== "undefined" && window.location.protocol === "https:" ? "https:" : "http:";
+}
+
+function resolveOrigin(port: number) {
+  return `${getBrowserProtocol()}//${lanHost || getBrowserHost()}:${port}`;
 }
 
 const screenIds = [
@@ -114,7 +128,7 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
     async sendControl(input: Omit<ControlCommand, "timestamp"> & { timestamp?: number }) {
       const command: ControlCommand = {
         type: "control.command",
-        id: input.id || crypto.randomUUID(),
+        id: input.id || `firebase-${createIdFragment()}`,
         module: input.module,
         target: input.target,
         command: input.command,
@@ -314,9 +328,9 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
     screenId,
     owner,
     url: owner === "vj"
-      ? `http://localhost:4302/screen/${encodeURIComponent(screenId)}`
+      ? `${resolveOrigin(4302)}/screen/${encodeURIComponent(screenId)}`
       : owner === "baofa"
-        ? `http://localhost:4303/screen/${encodeURIComponent(screenId)}`
+        ? `${resolveOrigin(4303)}/screen/${encodeURIComponent(screenId)}`
         : null,
     updatedAt,
     source
@@ -377,7 +391,7 @@ async function pushEvent(
   payload?: unknown
 ) {
   await firebasePost(`${rootPath}/events`, {
-    id: crypto.randomUUID(),
+    id: `event-${createIdFragment()}`,
     type,
     module,
     source,

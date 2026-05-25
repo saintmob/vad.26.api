@@ -37,6 +37,10 @@ const SCREEN_TOPOLOGY = [
 
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS = new Set(["A1", "B1", "B2", "B3", "B4", "B5", "B6"]);
+const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
+  const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
+  return origin ? `${origin.protocol}//${origin.host}` : null;
+})();
 
 export function isModuleName(value: unknown): value is ModuleName {
   return typeof value === "string" && MODULE_NAMES.includes(value as ModuleName);
@@ -297,7 +301,8 @@ export class ShowStateStore {
   }
 
   applyModulePatch(moduleName: ModuleName, patch: JsonRecord, source = "module"): PerformanceState {
-    mergePatch(this.state.modules[moduleName] as unknown as JsonRecord, patch);
+    const sanitizedPatch = moduleName === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
+    mergePatch(this.state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
     if (moduleName === "audio" && typeof patch.masterLevel === "number") {
       this.state.modules.audio.masterLevel = clampUnit(patch.masterLevel, this.state.modules.audio.masterLevel);
     }
@@ -307,7 +312,7 @@ export class ShowStateStore {
     if (moduleName === "interaction") {
       this.state.modules.interaction.screenTopology = normalizeScreenTopology(this.state.modules.interaction.screenTopology);
       this.state.modules.interaction.screenRegistry = normalizeScreenRegistry(this.state.modules.interaction.screenRegistry);
-      const patchedPreset = normalizeScreenRoutePreset(patch.screenRoutePreset);
+      const patchedPreset = normalizeScreenRoutePreset(sanitizedPatch.screenRoutePreset);
       if (patchedPreset) {
         this.state.modules.interaction.screenRoutePreset = patchedPreset;
         this.state.modules.interaction.screenRoutes = createScreenRoutesForPreset(patchedPreset, Date.now());
@@ -636,13 +641,46 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
   return {
     screenId,
     owner,
-    url: owner === "vj"
-      ? `http://localhost:4302/screen/${encodeURIComponent(screenId)}`
-      : owner === "baofa"
-        ? `http://localhost:4303/screen/${encodeURIComponent(screenId)}`
-        : null,
+    url: resolveScreenRouteUrl(CONFIGURED_SCREEN_ROUTE_ORIGIN, owner, screenId),
     updatedAt,
     source
+  };
+}
+
+export function resolveScreenRouteUrl(origin: string | null | undefined, owner: ScreenOwner, screenId: string) {
+  if (owner !== "vj" && owner !== "baofa") return null;
+  const port = owner === "vj" ? 4302 : 4303;
+  const normalizedOrigin = normalizeScreenRouteOrigin(origin);
+  if (!normalizedOrigin) return null;
+  const url = new URL(`${normalizedOrigin.protocol}//${normalizedOrigin.host}`);
+  url.port = String(port);
+  url.pathname = `/screen/${encodeURIComponent(screenId)}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+export function resolveStateScreenRoutes(state: PerformanceState, origin: string | null | undefined): PerformanceState {
+  const screenRoutes: Record<string, ScreenRouteEntry> = {};
+  for (const [screenId, route] of Object.entries(state.modules.interaction.screenRoutes || {})) {
+    const owner = normalizeScreenOwner(route?.owner) || "off";
+    screenRoutes[screenId] = {
+      ...route,
+      screenId,
+      owner,
+      url: resolveScreenRouteUrl(origin, owner, screenId),
+      updatedAt: positiveNumber(route?.updatedAt, Date.now())
+    };
+  }
+  return {
+    ...state,
+    modules: {
+      ...state.modules,
+      interaction: {
+        ...state.modules.interaction,
+        screenRoutes
+      }
+    }
   };
 }
 
@@ -676,9 +714,7 @@ function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
       ...existing,
       screenId,
       owner,
-      url: typeof existing.url === "string" || existing.url === null
-        ? existing.url
-        : makeScreenRoute(screenId, owner, defaults[screenId].updatedAt).url,
+      url: resolveScreenRouteUrl(CONFIGURED_SCREEN_ROUTE_ORIGIN, owner, screenId),
       updatedAt: positiveNumber(existing.updatedAt, defaults[screenId].updatedAt)
     };
   }
@@ -691,6 +727,26 @@ function normalizeScreenOwner(value: unknown): ScreenOwner | null {
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
   return ["balanced", "vj_takeover", "baofa_takeover"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
+}
+
+function sanitizeInteractionModulePatch(patch: JsonRecord) {
+  const sanitized = { ...patch };
+  delete sanitized.screenRoutes;
+  delete sanitized.screenRoutePreset;
+  delete sanitized.screenPresentation;
+  return sanitized;
+}
+
+function normalizeScreenRouteOrigin(value: unknown): { protocol: "http:" | "https:"; host: string } | null {
+  const input = String(value || "").trim();
+  if (!input) return null;
+  try {
+    const url = new URL(input);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return { protocol: url.protocol as "http:" | "https:", host: url.host };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeScreenTopology(value: unknown): string[][] {

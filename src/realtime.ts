@@ -26,6 +26,14 @@ export class RealtimeHub {
     }
   }
 
+  forEachSocket(callback: (socket: WebSocket) => void) {
+    for (const socket of this.sockets) callback(socket);
+  }
+
+  forEachSseClient(callback: (client: Response) => void) {
+    for (const client of this.sseClients) callback(client);
+  }
+
   broadcast<T extends ServerMessage>(message: T) {
     const payload = JSON.stringify(message);
     for (const socket of this.sockets) {

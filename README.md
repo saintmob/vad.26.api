@@ -15,10 +15,18 @@
 
 本地默认通信地址：
 
-- HTTP：`http://localhost:4300`
-- WebSocket：`ws://localhost:4300/ws`
+- HTTP：`http://<LAN_IP>:4300`
+- WebSocket：`ws://<LAN_IP>:4300/ws`
 
-跨机器部署时，只替换 `localhost` 为控制机 LAN IP，端口保持不变。
+跨机器部署时，屏幕侧应使用同一台控制机的 LAN IP，端口保持不变。
+
+如果 4300 前面挂了反向代理、域名或公网入口，可以显式指定路由 origin：
+
+```bash
+SHOW_SCREEN_ROUTE_ORIGIN=https://show.example.com
+```
+
+也兼容 `SHOW_PUBLIC_ORIGIN`。设置后，4300 会优先按这个 origin 生成 4302 / 4303 的绝对路由 URL。
 
 ## 启动
 
@@ -30,7 +38,7 @@ npm run dev
 打开：
 
 ```text
-http://localhost:4300
+http://<LAN_IP>:4300
 ```
 
 生产构建：
@@ -52,7 +60,7 @@ npm test
 2. 启动 4301 DJ。
 3. 启动 4302 VJ。
 4. 启动 4303 baofa。
-5. 每台屏幕机器只打开 `http://localhost:4300/screen/<screenId>`。
+5. 每台屏幕机器只打开 `http://<LAN_IP>:4300/screen/<screenId>`。
 
 屏幕 ID：
 
@@ -90,8 +98,8 @@ Multi-screen Interaction 控制 4303 baofa 与屏幕路由：
 
 每个屏幕可单独设置 owner：
 
-- `VJ`：跳转到 `http://localhost:4302/screen/<screenId>`
-- `Baofa`：跳转到 `http://localhost:4303/screen/<screenId>`
+- `VJ`：跳转到 4300 后端返回的 4302 绝对 URL
+- `Baofa`：跳转到 4300 后端返回的 4303 绝对 URL
 - `Off` / `Diag`：停留在 4300 本地状态页
 
 baofa 额外控制：
@@ -111,9 +119,9 @@ baofa 额外控制：
 现场每台屏幕统一打开：
 
 ```text
-http://localhost:4300/screen/A1
-http://localhost:4300/screen/B3
-http://localhost:4300/screen/R2
+http://<LAN_IP>:4300/screen/A1
+http://<LAN_IP>:4300/screen/B3
+http://<LAN_IP>:4300/screen/R2
 ```
 
 4300 会读取当前路由并自动跳转：
@@ -159,7 +167,7 @@ CONTROL_TOKEN=your-token
 则 mutating REST 请求与 WebSocket 控制消息需要携带：
 
 - Header：`x-control-token: your-token`
-- 或 WebSocket query：`ws://localhost:4300/ws?token=your-token`
+- 或 WebSocket query：`ws://<LAN_IP>:4300/ws?token=your-token`
 
 `VITE_CONTROL_TOKEN` 只适合本地/LAN 前端自动填入控制台使用。所有 `VITE_` 变量都会进入浏览器 bundle，不是秘密；公网部署时不要把高权限 token 放在 `VITE_CONTROL_TOKEN` 里。
 
