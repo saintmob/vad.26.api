@@ -1,6 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import express, { Express, Request, Response } from "express";
 import { WebSocket, WebSocketServer } from "ws";
@@ -19,6 +20,23 @@ import { ClientHelloMessage, JsonRecord, PerformanceState } from "./types.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SHOW_CONTROL_PORT = 4300;
 const defaultSnapshotPath = () => process.env.SHOW_STATE_PATH || path.join(process.cwd(), "data", "show-state.json");
+
+function getLanAddresses(port: number) {
+  const addresses = new Set<string>();
+  const interfaces = os.networkInterfaces();
+
+  for (const infos of Object.values(interfaces)) {
+    for (const info of infos || []) {
+      if (!info) continue;
+      const isBenchmarkRange = info.address.startsWith("198.18.") || info.address.startsWith("198.19.");
+      if (info.family === "IPv4" && !info.internal && !isBenchmarkRange) {
+        addresses.add(`http://${info.address}:${port}`);
+      }
+    }
+  }
+
+  return [...addresses];
+}
 
 export interface CreateServerOptions {
   initialState?: PerformanceState;
@@ -386,7 +404,11 @@ async function start() {
   }
 
   server.listen(SHOW_CONTROL_PORT, "0.0.0.0", () => {
-    console.log(`VAD show control listening on http://localhost:${SHOW_CONTROL_PORT}`);
+    const lanUrls = getLanAddresses(SHOW_CONTROL_PORT);
+    console.log(`VAD show control listening on http://0.0.0.0:${SHOW_CONTROL_PORT}`);
+    if (lanUrls.length > 0) {
+      console.log(`LAN URLs: ${lanUrls.join(", ")}`);
+    }
   });
 }
 

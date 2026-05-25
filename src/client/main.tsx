@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import type { ControlCommand, ModuleName, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
 import { createFirebaseDashboardClient, shouldUseFirebaseRealtime } from "./firebaseShowControl";
+import { getAccessScope, getScreenUrlForOwner, type ScreenOwner } from "./accessHost";
 import "./styles.css";
 
 type ConnectionState = "connecting" | "connected" | "offline";
@@ -1123,6 +1124,7 @@ function App() {
                 >
                   {screenLayoutItems.map((screen) => {
                     const route = screenRoutes[screen.id];
+                    const routeTargetUrl = route ? getScreenUrlForOwner(route.owner as ScreenOwner, screen.id) : null;
                     return (
                       <button
                         key={screen.id}
@@ -1136,7 +1138,7 @@ function App() {
                         ].filter(Boolean).join(" ")}
                         style={getScreenLayoutStyle(screen)}
                         onClick={() => handleScreenSelect(screen.id)}
-                        title={route?.url || route?.owner || screen.id}
+                        title={routeTargetUrl || route?.owner || screen.id}
                       >
                         <strong>{screen.id}</strong>
                         <span>{ui.screenOwners[route?.owner || "unset"]}</span>
@@ -1247,13 +1249,14 @@ function App() {
 
                 {rightRailOpen ? (
                   <div className="route-table route-table--rail">
-                    {routeScreenIds.map((screenId) => {
+                  {routeScreenIds.map((screenId) => {
                       const route = screenRoutes[screenId];
+                      const routeTargetUrl = route ? getScreenUrlForOwner(route.owner as ScreenOwner, screenId) : null;
                       return (
                         <article key={screenId}>
                           <div>
                             <strong>{screenId}</strong>
-                            <span>{route?.url || "4300 local status"}</span>
+                            <span>{routeTargetUrl || "4300 local status"}</span>
                             <small>{route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"}</small>
                           </div>
                           <div className="owner-switch" aria-label={`${screenId} owner`}>
@@ -1524,12 +1527,14 @@ function ScreenGateway({ screenId }: { screenId: string }) {
   const [connection, setConnection] = React.useState<ConnectionState>("connecting");
   const [message, setMessage] = React.useState("Resolving route");
   const route = snapshot?.modules.interaction.screenRoutes?.[screenId];
+  const accessScope = getAccessScope();
   const screenPresentation = snapshot?.modules.interaction.screenPresentation || {
     autoRedirect: true,
     showDebug: false,
     showMenu: false
   };
   const isValidScreen = Boolean(route);
+  const routeTargetUrl = route ? getScreenUrlForOwner(route.owner as ScreenOwner, screenId) : null;
 
   React.useEffect(() => {
     let closed = false;
@@ -1596,13 +1601,13 @@ function ScreenGateway({ screenId }: { screenId: string }) {
       setMessage(`Manual routing hold for ${formatOwner(route.owner)}`);
       return;
     }
-    if ((route.owner === "vj" || route.owner === "baofa") && route.url) {
-      setMessage(`Routing ${screenId} to ${formatOwner(route.owner)}`);
-      window.location.replace(route.url);
+    if ((route.owner === "vj" || route.owner === "baofa") && routeTargetUrl) {
+      setMessage(`Routing ${screenId} to ${formatOwner(route.owner)} (${accessScope})`);
+      window.location.replace(routeTargetUrl);
       return;
     }
     setMessage(route.owner === "diagnostic" ? "Diagnostic hold" : "Screen is off");
-  }, [route, screenId, screenPresentation.autoRedirect, snapshot]);
+  }, [accessScope, route, routeTargetUrl, screenId, screenPresentation.autoRedirect, snapshot]);
 
   return (
     <main className="screen-gateway">
@@ -1619,7 +1624,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
             </div>
             <div>
               <dt>URL</dt>
-              <dd>{route.url || "4300 local status"}</dd>
+              <dd>{routeTargetUrl || "4300 local status"}</dd>
             </div>
             <div>
               <dt>Auto Redirect</dt>
