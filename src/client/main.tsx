@@ -16,7 +16,10 @@ import {
   Sparkles,
   Square,
   X,
-  Type
+  Type,
+  Eye,
+  Bug,
+  Maximize
 } from "lucide-react";
 import type { ControlCommand, ModuleName, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
 import { createFirebaseDashboardClient, shouldUseFirebaseRealtime } from "./firebaseShowControl";
@@ -271,14 +274,14 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     interaction: {
       title: "Multi-screen Interaction",
       lead: "把屏幕路由、呈现状态与序列控制收在首屏。",
-      routePreset: "路由预设",
+      routePreset: "预设",
       presentation: "呈现开关",
       selectionMode: "选择模式",
       screenMap: "屏幕拓扑",
-      routeRegister: "路由清单",
-      eventLog: "事件日志",
-      clients: "连接客户端",
-      routeHint: "点击或框选屏幕，直接编排序列与路由。",
+      routeRegister: "路由",
+      eventLog: "日志",
+      clients: "设备",
+      routeHint: "点选或框选屏幕，直接编排。",
       mode: "模式",
       intensity: "强度",
       growth: "生长",
@@ -420,14 +423,14 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     interaction: {
       title: "Multi-screen Interaction",
       lead: "Keep routing, presentation and sequence control on the first screen.",
-      routePreset: "Route preset",
+      routePreset: "Preset",
       presentation: "Presentation",
       selectionMode: "Selection mode",
       screenMap: "Screen topology",
-      routeRegister: "Route register",
-      eventLog: "Event log",
-      clients: "Connected clients",
-      routeHint: "Click or box select screens to build routing sequences.",
+      routeRegister: "Routes",
+      eventLog: "Log",
+      clients: "Devices",
+      routeHint: "Click or box select screens to edit routes.",
       mode: "Mode",
       intensity: "Intensity",
       growth: "Growth",
@@ -939,41 +942,43 @@ function App() {
         </div>
 
         <div className="console-header__rail">
-          <div className="status-stack">
-            <div className="status-chip">
-              <div className={`connection-dot ${connection}`} />
-              <div>
-                <strong>{ui.app.connection}</strong>
-                <span>{ui.status[connection]}</span>
+          <div className="header-summary">
+            <div className="header-metrics" aria-label={locale === "zh" ? "路由与在线设备" : "Routes and online devices"}>
+              <div className="header-metric">
+                <span>{locale === "zh" ? "路由设备" : "Routes"}</span>
+                <strong>{routeCount}</strong>
+              </div>
+              <div className="header-metric">
+                <span>{locale === "zh" ? "在线设备" : "Online"}</span>
+                <strong>{clientCount}</strong>
               </div>
             </div>
-            <div className="status-chip">
-              <div>
-                <strong>{ui.app.showStatus}</strong>
-                <span>{showStatusLabel}</span>
+
+            <div className="status-stack">
+              <div className="status-chip">
+                <div className={`connection-dot ${connection}`} />
+                <div>
+                  <strong>{ui.app.connection}</strong>
+                  <span>{ui.status[connection]}</span>
+                </div>
               </div>
-            </div>
-            <div className="status-chip">
-              <div>
-                <strong>{ui.app.clients}</strong>
-                <span>{clients.length}</span>
-              </div>
-            </div>
-            <div className="status-chip">
-              <div>
-                <strong>{ui.app.ack}</strong>
-                <span>{latestAck}</span>
+              <div className="status-chip">
+                <div>
+                  <strong>{ui.app.showStatus}</strong>
+                  <span>{showStatusLabel}</span>
+                </div>
               </div>
             </div>
           </div>
 
           <button
             type="button"
-            className="meta-icon-button"
+            className="settings-trigger"
             aria-label={ui.layout.systemSettings}
             onClick={() => setSettingsOpen(true)}
           >
             <Settings2 size={16} />
+            <span>{ui.layout.systemSettings}</span>
           </button>
         </div>
       </header>
@@ -1035,115 +1040,18 @@ function App() {
         )}
 
         {activeTab === "interaction" ? (
-          <section className="workspace-grid workspace-grid--interaction" style={interactionLayoutStyle}>
+          <section className="workspace-grid workspace-grid--interaction">
             <Panel
               title={ui.interaction.title}
               icon={<MonitorCog size={18} />}
               className="workspace-panel workspace-panel--interaction"
             >
-              <p className="panel-lead panel-lead--tight">{ui.interaction.routeHint}</p>
-
-              <div className="stage-toolbar">
-                <div className="stage-toolbar__top">
-                  <div className="route-presets" aria-label={ui.interaction.routePreset}>
-                    {screenRoutePresets.map((preset) => (
-                      <button
-                        key={preset.value}
-                        type="button"
-                        className={snapshot.modules.interaction.screenRoutePreset === preset.value ? "selected" : ""}
-                        onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
-                      >
-                        {ui.screenRoutePresets[preset.value]}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="screen-tools">
-                    {screenSelectionModes.map((mode) => (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        className={screenSelectionMode === mode.id ? "selected" : ""}
-                        onClick={() => {
-                          setScreenSelectionMode(mode.id);
-                          setDragBox(null);
-                          if (mode.id === "solid") clearSequence();
-                        }}
-                      >
-                        {ui.screenSelectionModes[mode.id]}
-                      </button>
-                    ))}
-                    {sequenceGroups.length > 0 && (
-                      <button type="button" onClick={clearSequence}>{ui.actions.clearSequence}</button>
-                    )}
-                  </div>
-
-                  <div className="presentation-controls" aria-label={ui.interaction.presentation}>
-                    <span className="presentation-controls__label">{ui.layout.quickActions}</span>
-                    <div className="presentation-controls__buttons">
-                      <button
-                        type="button"
-                        className={screenPresentation.autoRedirect ? "selected" : ""}
-                        onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
-                      >
-                        {ui.interaction.autoRedirect}
-                      </button>
-                      <button
-                        type="button"
-                        className={screenPresentation.showMenu ? "selected" : ""}
-                        onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
-                      >
-                        {ui.interaction.showMenu}
-                      </button>
-                      <button
-                        type="button"
-                        className={screenPresentation.showDebug ? "selected" : ""}
-                        onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
-                      >
-                        {ui.interaction.showDebug}
-                      </button>
-                      <button type="button" onClick={saveSnapshot}>
-                        <Save size={15} /> {ui.actions.save}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="stage-toolbar__bottom">
-                  <div className="stage-summary-row">
-                    <div className="interaction-readout">
-                      <span>{ui.interaction.intensity} {Math.round(snapshot.modules.interaction.intensity * 100)}%</span>
-                      <span>{ui.interaction.growth} {Math.round(snapshot.modules.interaction.treeGrowth * 100)}%</span>
-                      <span>{snapshot.modules.interaction.gestureActive ? ui.interaction.gesture : ui.status.offline}</span>
-                      <span>{ui.interaction.route} {ui.screenRoutePresets[snapshot.modules.interaction.screenRoutePreset]}</span>
-                    </div>
-
-                    {sequenceGroups.length > 0 && (
-                      <div className="sequence-step-control">
-                        <span>{ui.interaction.step}</span>
-                        {sequenceSteps.map((step) => (
-                          <button
-                            key={step}
-                            type="button"
-                            className={sequenceStep === step ? "selected" : ""}
-                            onClick={() => setSequenceStep(step)}
-                          >
-                            {step}
-                          </button>
-                        ))}
-                        <small>{Math.round(stepDurationMs(sequenceStep, snapshot.show.bpm))}ms @ {snapshot.show.bpm} BPM</small>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="stage-mode-grid">
-                    <div className="stage-control-group">
-                      <div className="stage-control-head">
-                        <div>
-                          <p>Mode / 模式</p>
-                          <strong>{snapshot.modules.interaction.visualMode === "firework" ? "Fireworks / 烟花" : "Tree / 树"}</strong>
-                        </div>
-                        <div className="segmented-control" aria-label="Interaction mode">
+                <div className="interaction-layout-core">
+                  <div className="interaction-header-block">
+                    <div className="header-main">
+                      <div className="header-mode-toggle">
+                        <div className="mode-pill-label">Visual Mode: <strong>{snapshot.modules.interaction.visualMode === "firework" ? "FIREWORKS" : "TREE"}</strong></div>
+                        <div className="segmented-control global-mode-switch">
                           <button
                             type="button"
                             className={snapshot.modules.interaction.visualMode === "tree" ? "selected" : ""}
@@ -1160,177 +1068,217 @@ function App() {
                           </button>
                         </div>
                       </div>
+                      <div className="header-action-bar">
+                        {snapshot.modules.interaction.visualMode === "tree" ? (
+                          <div className="action-group">
+                            <span className="action-label">Tree Control: <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong></span>
+                            <div className="action-buttons">
+                            {["idle", "flow", "interaction", "climax"].map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                className={snapshot.modules.interaction.mode === mode ? "selected" : ""}
+                                onClick={() => triggerInteractionMode(mode)}
+                              >
+                                {ui.interactionModes[mode]}
+                              </button>
+                            ))}
+                            <button type="button" className="reset-btn" onClick={() => { clearSequence(); resetTreeGrowth(); }}>
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="action-group">
+                          <span className="action-label">Fireworks: <strong>{fireworkStateLabel}</strong></span>
+                          <div className="action-buttons">
+                            <button
+                              type="button"
+                              className={fireworkState === "standby" ? "selected" : ""}
+                              onClick={standbyFireworks}
+                            >
+                              Standby
+                            </button>
+                            <button
+                              type="button"
+                              className={fireworkState === "launching" ? "selected" : ""}
+                              onClick={launchFireworks}
+                            >
+                              Launch
+                            </button>
+                            <button
+                              type="button"
+                              className={fireworkState === "resetting" ? "selected" : ""}
+                              onClick={resetFireworks}
+                            >
+                              Reset
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {snapshot.modules.interaction.visualMode === "tree" ? (
-                      <div className="stage-control-group">
-                        <div className="stage-control-head">
-                          <div>
-                            <p>Tree / 树控制</p>
-                            <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong>
+                    <div className="header-sequence-pill">
+                      {sequenceGroups.length > 0 && (
+                        <div className="seq-pill">
+                          <span className="seq-label">{ui.interaction.step}</span>
+                          <div className="seq-buttons">
+                            {sequenceSteps.map((step) => (
+                              <button
+                                key={step}
+                                type="button"
+                                className={sequenceStep === step ? "selected" : ""}
+                                onClick={() => setSequenceStep(step)}
+                              >
+                                {step}
+                              </button>
+                            ))}
                           </div>
-                          <span className="stage-control-status">
-                            {ui.interactionModes[snapshot.modules.interaction.mode]}
-                          </span>
                         </div>
-                        <div className="stage-actions">
-                          <button
-                            type="button"
-                            className={snapshot.modules.interaction.mode === "idle" ? "selected" : ""}
-                            onClick={() => triggerInteractionMode("idle")}
-                          >
-                            {ui.interactionModes.idle}
-                          </button>
-                          <button
-                            type="button"
-                            className={snapshot.modules.interaction.mode === "flow" ? "selected" : ""}
-                            onClick={() => triggerInteractionMode("flow")}
-                          >
-                            {ui.interactionModes.flow}
-                          </button>
-                          <button
-                            type="button"
-                            className={snapshot.modules.interaction.mode === "interaction" ? "selected" : ""}
-                            onClick={() => triggerInteractionMode("interaction")}
-                          >
-                            {ui.interactionModes.interaction}
-                          </button>
-                          <button
-                            type="button"
-                            className={snapshot.modules.interaction.mode === "climax" ? "selected" : ""}
-                            onClick={() => triggerInteractionMode("climax")}
-                          >
-                            {ui.interactionModes.climax}
-                          </button>
-                        </div>
-                        <div className="stage-actions stage-actions--utility">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              clearSequence();
-                              resetTreeGrowth();
-                            }}
-                          >
-                            Reset tree / 重置树
-                          </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="screen-stage-container">
+                    <div className="screen-stage-header">
+                      <div className="presentation-toggles">
+                        <button
+                          type="button"
+                          className={screenPresentation.showMenu ? "selected" : ""}
+                          onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
+                        >
+                          <Eye size={14} /> {ui.interaction.showMenu}
+                        </button>
+                        <button
+                          type="button"
+                          className={screenPresentation.showDebug ? "selected" : ""}
+                          onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
+                        >
+                          <Bug size={14} /> {ui.interaction.showDebug}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="screen-stage">
+                      <div className="stage-overlay-tools">
+                        <div className="selection-mode-picker">
+                          {screenSelectionModes.map((mode) => {
+                            const Icon = mode.id === "solid" ? Square : mode.id === "dashed" ? Grid3X3 : Maximize;
+                            return (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                className={screenSelectionMode === mode.id ? "selected" : ""}
+                                onClick={() => {
+                                  setScreenSelectionMode(mode.id);
+                                  setDragBox(null);
+                                  if (mode.id === "solid") clearSequence();
+                                }}
+                                title={ui.screenSelectionModes[mode.id]}
+                              >
+                                <Icon size={16} />
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
-                    ) : (
-                      <div className="stage-control-group">
-                        <div className="stage-control-head">
-                          <div>
-                            <p>Fireworks / 烟花控制</p>
-                            <strong>{ui.fireworkStates.status}</strong>
-                          </div>
-                          <span className={`stage-control-status stage-control-status--${fireworkState}`}>
-                            {fireworkStateLabel}
-                          </span>
-                        </div>
-                        <div className="stage-actions">
-                          <button
-                            type="button"
-                            className={fireworkState === "standby" ? "selected" : ""}
-                            onClick={standbyFireworks}
-                          >
-                            Standby / 待机
-                          </button>
-                          <button
-                            type="button"
-                            className={fireworkState === "launching" ? "selected" : ""}
-                            onClick={launchFireworks}
-                          >
-                            Launch / 燃放
-                          </button>
-                          <button
-                            type="button"
-                            className={fireworkState === "resetting" ? "selected" : ""}
-                            onClick={resetFireworks}
-                          >
-                            Reset / 重置
-                          </button>
-                          <span className="stage-control-chip">
-                            Status: {fireworkStateLabel}
-                          </span>
-                        </div>
+                      <div
+                        className={`screen-grid selection-mode-${screenSelectionMode}`}
+                        aria-label={ui.interaction.screenMap}
+                        ref={screenGridRef}
+                        onPointerDown={handleBoxPointerDown}
+                        onPointerMove={handleBoxPointerMove}
+                        onPointerUp={handleBoxPointerUp}
+                        onPointerCancel={() => setDragBox(null)}
+                      >
+                        {screenLayoutItems.map((screen) => {
+                          const route = screenRoutes[screen.id];
+                          return (
+                            <button
+                              key={screen.id}
+                              type="button"
+                              data-screen-id={screen.id}
+                              className={[
+                                snapshot.modules.interaction.screenId === screen.id ? "selected" : "",
+                                sequenceOrderByScreen.has(screen.id) ? "sequenced" : "",
+                                screen.id === "A1" ? "master-screen" : "",
+                                route?.owner ? `owner-${route.owner}` : ""
+                              ].filter(Boolean).join(" ")}
+                              style={getScreenLayoutStyle(screen)}
+                              onClick={() => handleScreenSelect(screen.id)}
+                              title={route?.url || route?.owner || screen.id}
+                            >
+                              <strong>{screen.id}</strong>
+                              <span>{ui.screenOwners[route?.owner || "unset"]}</span>
+                              {sequenceOrderByScreen.has(screen.id) && (
+                                <em className="screen-order">{sequenceOrderByScreen.get(screen.id)}</em>
+                              )}
+                            </button>
+                          );
+                        })}
+                        {dragBox && <span className="selection-box" style={dragBoxStyle(dragBox)} />}
                       </div>
-                    )}
+                      <p className="stage-hint stage-hint--overlay">{ui.interaction.routeHint}</p>
+                    </div>
+                  </div>
+                  <div className="interaction-readout-row" aria-label={locale === "zh" ? "状态概览" : "Status overview"}>
+                    {["intensity", "treeGrowth", "gestureActive", "screenRoutePreset"].map((key, idx) => {
+                      const val = snapshot.modules.interaction[key];
+                      const label = idx === 0 ? ui.interaction.intensity :
+                                    idx === 1 ? ui.interaction.growth :
+                                    idx === 2 ? ui.interaction.gesture : ui.interaction.route;
+
+                      let displayVal = "";
+                      if (idx === 0 || idx === 1) displayVal = `${Math.round(val * 100)}%`;
+                      else if (idx === 2) displayVal = val ? "ACTIVE" : "IDLE";
+                      else displayVal = ui.screenRoutePresets[val as ScreenRoutePreset];
+
+                      return (
+                        <div key={key} className="header-stat-pill">
+                          <span className="stat-label">{label}</span>
+                          <span className={`stat-value ${idx === 2 && val ? "active" : ""}`}>{displayVal}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              </div>
-
-              <div className="screen-stage">
-                <div
-                  className={`screen-grid selection-mode-${screenSelectionMode}`}
-                  aria-label={ui.interaction.screenMap}
-                  ref={screenGridRef}
-                  onPointerDown={handleBoxPointerDown}
-                  onPointerMove={handleBoxPointerMove}
-                  onPointerUp={handleBoxPointerUp}
-                  onPointerCancel={() => setDragBox(null)}
-                >
-                  {screenLayoutItems.map((screen) => {
-                    const route = screenRoutes[screen.id];
-                    return (
-                      <button
-                        key={screen.id}
-                        type="button"
-                        data-screen-id={screen.id}
-                        className={[
-                          snapshot.modules.interaction.screenId === screen.id ? "selected" : "",
-                          sequenceOrderByScreen.has(screen.id) ? "sequenced" : "",
-                          screen.id === "A1" ? "master-screen" : "",
-                          route?.owner ? `owner-${route.owner}` : ""
-                        ].filter(Boolean).join(" ")}
-                        style={getScreenLayoutStyle(screen)}
-                        onClick={() => handleScreenSelect(screen.id)}
-                        title={route?.url || route?.owner || screen.id}
-                      >
-                        <strong>{screen.id}</strong>
-                        <span>{ui.screenOwners[route?.owner || "unset"]}</span>
-                        {sequenceOrderByScreen.has(screen.id) && (
-                          <em className="screen-order">{sequenceOrderByScreen.get(screen.id)}</em>
-                        )}
-                      </button>
-                    );
-                  })}
-                  {dragBox && <span className="selection-box" style={dragBoxStyle(dragBox)} />}
+                <div className="interaction-controls-footer">
+                  {/* All controls moved to interaction-header-block */}
                 </div>
-              </div>
             </Panel>
 
             <aside className="interaction-rail interaction-rail--right">
               <div className="rail-shell">
                 <div className="rail-header">
                   <div>
-                    <p>{locale === "zh" ? "右侧概览" : "Side overview"}</p>
-                    <strong>{locale === "zh" ? "路由 · 日志" : "Routes · Logs"}</strong>
+                    <strong>{ui.layout.routes}</strong>
                   </div>
-                  <span className="rail-header__meta">{routeCount}</span>
                 </div>
 
                 <div className="rail-stack rail-stack--right">
-                  <div className="inspector-stats">
-                    <div>
-                      <span>{ui.layout.routes}</span>
-                      <strong>{routeCount}</strong>
-                    </div>
-                    <div>
-                      <span>{ui.interaction.clients}</span>
-                      <strong>{clientCount}</strong>
-                    </div>
-                    <div>
-                      <span>{ui.interaction.eventLog}</span>
-                      <strong>{eventCount}</strong>
-                    </div>
-                  </div>
-
                   <section className="route-board">
                     <div className="route-board__head">
                       <div>
                         <p>{ui.interaction.routeRegister}</p>
-                        <strong>{locale === "zh" ? "快速编排" : "Quick route edit"}</strong>
+                        <strong>{ui.interaction.routePreset}</strong>
                       </div>
                       <span>{routeCount}</span>
+                    </div>
+
+                    <div className="route-presets-rail">
+                      <span className="rail-label">{ui.interaction.routePreset}</span>
+                      <div className="route-presets">
+                        {screenRoutePresets.map((preset) => (
+                          <button
+                            key={preset.value}
+                            type="button"
+                            className={snapshot.modules.interaction.screenRoutePreset === preset.value ? "selected" : ""}
+                            onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
+                          >
+                            {ui.screenRoutePresets[preset.value]}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="route-table route-table--rail">
@@ -1341,13 +1289,14 @@ function App() {
                           routeClients,
                           locale === "zh" ? "暂无在线设备" : "No live device"
                         );
+                        const isSelected = snapshot.modules.interaction.screenId === screenId;
                         return (
-                          <article key={screenId}>
+                          <article key={screenId} className={isSelected ? "selected" : ""}>
                             <div>
                               <strong>{screenId}</strong>
                               <span>{route?.url || "Route URL unavailable"}</span>
                               <small className="route-meta-line">
-                                {route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"} · {ui.interaction.clients}: {clientSummary}
+                                {route?.updatedAt ? new Date(route.updatedAt).toLocaleTimeString() : (locale === "zh" ? "等待中" : "Waiting")} · {ui.interaction.clients}: {clientSummary}
                               </small>
                             </div>
                             <div className="owner-switch" aria-label={`${screenId} owner`}>
@@ -1369,7 +1318,7 @@ function App() {
                       {unassignedClients.length > 0 && (
                         <article className="route-table__unassigned">
                           <div>
-                            <strong>{locale === "zh" ? "未绑定设备" : "Unassigned devices"}</strong>
+                            <strong>{locale === "zh" ? "未绑定" : "Unassigned"}</strong>
                             <span>{summarizeClientIds(unassignedClients, locale === "zh" ? "暂无在线设备" : "No live device")}</span>
                             <small>{ui.interaction.clients}</small>
                           </div>
@@ -1382,7 +1331,6 @@ function App() {
                     <div className="rail-log__head">
                       <div>
                         <p>{ui.interaction.eventLog}</p>
-                        <strong>{locale === "zh" ? "最近记录" : "Recent events"}</strong>
                       </div>
                       <div className="rail-log__head-actions">
                         {snapshot.eventLog.length > 6 && (
@@ -1396,6 +1344,11 @@ function App() {
                         )}
                         <span>{eventCount}</span>
                       </div>
+                    </div>
+
+                    <div className="rail-log__ack">
+                      <span>{locale === "zh" ? "回执" : "Ack"}</span>
+                      <strong>{latestAck}</strong>
                     </div>
 
                     <div className="event-list event-list--compact rail-log__body">
@@ -1620,6 +1573,31 @@ function App() {
                       {ui.language[mode]}
                     </button>
                   ))}
+                </div>
+              </section>
+
+              <section className="settings-block">
+                <div className="settings-block__head">
+                  <h3>{ui.layout.quickActions}</h3>
+                  <span>{ui.interaction.presentation}</span>
+                </div>
+                <div className="settings-actions-grid">
+                  <div className="settings-action-item">
+                    <span>{ui.interaction.autoRedirect}</span>
+                    <button
+                      type="button"
+                      className={screenPresentation.autoRedirect ? "selected" : ""}
+                      onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
+                    >
+                      {screenPresentation.autoRedirect ? "ON" : "OFF"}
+                    </button>
+                  </div>
+                  <div className="settings-action-item">
+                    <span>{ui.actions.save}</span>
+                    <button type="button" className="save-btn" onClick={saveSnapshot}>
+                      <Save size={14} /> {ui.actions.save}
+                    </button>
+                  </div>
                 </div>
               </section>
 
