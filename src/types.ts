@@ -136,12 +136,14 @@ export interface InteractionModuleState {
     autoRedirect: boolean;
     showDebug: boolean;
     showMenu: boolean;
+    configured: boolean;
   };
   screenId: string;
   role: "screen" | "master";
   overview: boolean;
   mode: "idle" | "interaction" | "flow" | "climax";
   visualMode: "tree" | "firework";
+  fireworkState: "standby" | "launching" | "resetting";
   intensity: number;
   treeGrowth: number;
   gestureActive: boolean;
@@ -158,6 +160,8 @@ export interface ClientInfo {
   lastSeen: number;
   latency: number | null;
   capabilities: string[];
+  screenId?: string;
+  overview?: boolean;
 }
 
 export interface EventLogItem {

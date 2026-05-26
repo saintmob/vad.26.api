@@ -13,6 +13,7 @@ import {
   isModuleName,
   normalizeAudioFrame,
   normalizeControlCommand,
+  resolveStateScreenPresentation,
   resolveStateScreenRoutes,
   ShowStateStore
 } from "./state.js";
@@ -72,7 +73,7 @@ function resolveRequestOrigin(headers: http.IncomingHttpHeaders, secure = false)
 }
 
 function resolveStateForRequest(state: PerformanceState, origin: string) {
-  return resolveStateScreenRoutes(state, origin);
+  return resolveStateScreenPresentation(resolveStateScreenRoutes(state, origin), origin);
 }
 
 export interface CreateServerOptions {

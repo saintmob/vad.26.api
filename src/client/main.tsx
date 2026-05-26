@@ -15,8 +15,7 @@ import {
   Send,
   SlidersHorizontal,
   Sparkles,
-  Type,
-  Zap
+  Type
 } from "lucide-react";
 import type { ControlCommand, ModuleName, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
 import { createFirebaseDashboardClient, shouldUseFirebaseRealtime } from "./firebaseShowControl";
@@ -326,10 +325,16 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       unset: "未设置"
     },
     interactionModes: {
-      idle: "待机",
-      interaction: "互动",
-      flow: "流动",
-      climax: "高潮"
+      idle: "CALM",
+      interaction: "PULSE",
+      flow: "FLOW",
+      climax: "CLIMAX"
+    },
+    fireworkStates: {
+      standby: "待机",
+      launching: "燃放",
+      resetting: "重置",
+      status: "状态"
     }
   },
   en: {
@@ -466,10 +471,16 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       unset: "Unset"
     },
     interactionModes: {
-      idle: "Idle",
-      interaction: "Interaction",
-      flow: "Flow",
-      climax: "Climax"
+      idle: "CALM",
+      interaction: "PULSE",
+      flow: "FLOW",
+      climax: "CLIMAX"
+    },
+    fireworkStates: {
+      standby: "Standby",
+      launching: "Launch",
+      resetting: "Reset",
+      status: "Status"
     }
   }
 };
@@ -501,12 +512,17 @@ const screenLayoutItems: ScreenLayoutItem[] = [
   { id: "D3", col: 6.8, row: 3.35 },
   { id: "E1", col: 5.5, row: 4.35, width: 1.15 },
   { id: "F1", col: 5.5, row: 5.55, width: 1.2 },
-  { id: "G1", col: 0.95, row: 4.2, height: 0.82 },
-  { id: "G2", col: 0.95, row: 5.4, height: 0.82 },
-  { id: "H1", col: 10.05, row: 4.2, height: 0.82 },
-  { id: "H2", col: 10.05, row: 5.4, height: 0.82 }
+  { id: "L1", col: 0.95, row: 4.2, height: 0.82 },
+  { id: "L2", col: 0.95, row: 5.4, height: 0.82 },
+  { id: "R1", col: 10.05, row: 4.2, height: 0.82 },
+  { id: "R2", col: 10.05, row: 5.4, height: 0.82 }
 ];
 const screenLayoutOrder = screenLayoutItems.map((screen) => screen.id);
+
+function normalizeScreenOccupancyId(value: string | null | undefined) {
+  if (!value) return "";
+  return value === "MASTER" ? "A1" : value;
+}
 
 function Root() {
   const screenId = getScreenIdFromPath();
@@ -735,6 +751,18 @@ function App() {
     }
   }, [postJson]);
 
+  const launchFireworks = React.useCallback(() => {
+    void sendControl("interaction", "setFireworkState", "firework-state", "launching");
+  }, [sendControl]);
+
+  const standbyFireworks = React.useCallback(() => {
+    void sendControl("interaction", "setFireworkState", "firework-state", "standby");
+  }, [sendControl]);
+
+  const resetFireworks = React.useCallback(() => {
+    void sendControl("interaction", "setFireworkState", "firework-state", "resetting");
+  }, [sendControl]);
+
   const saveSnapshot = React.useCallback(async () => {
     try {
       if (shouldUseFirebaseRealtime() && firebaseClientRef.current) {
@@ -790,13 +818,20 @@ function App() {
   const handleScreenSelect = React.useCallback((screenId: string) => {
     if (screenSelectionMode === "solid") {
       clearSequence();
-      void sendControl("interaction", "setScreen", screenId, screenId);
+      const occupiedClientId = snapshot
+        ? Object.values(snapshot.clients).find((client) =>
+            client.module === "interaction" &&
+            client.status === "online" &&
+            normalizeScreenOccupancyId(client.screenId) === normalizeScreenOccupancyId(screenId)
+          )?.id
+        : null;
+      void sendControl("interaction", "setScreen", occupiedClientId || screenId, screenId);
       return;
     }
     if (screenSelectionMode === "dashed") {
       addSequenceGroup([screenId]);
     }
-  }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl]);
+  }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl, snapshot]);
 
   const handleBoxPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (screenSelectionMode !== "box" || event.button !== 0) return;
@@ -834,20 +869,6 @@ function App() {
     event.currentTarget.releasePointerCapture(event.pointerId);
   }, [addSequenceGroup, dragBox, screenSelectionMode]);
 
-  const pulseSelectedScreens = React.useCallback(async () => {
-    if (sequenceGroups.length === 0 && snapshot) {
-      await sendControl("interaction", "pulseScreen", snapshot.modules.interaction.screenId, snapshot.modules.interaction.screenId);
-      return;
-    }
-
-    const groups = [...sequenceGroups].sort((a, b) => a.order - b.order);
-    const sequenceDelay = stepDurationMs(sequenceStep, snapshot?.show.bpm || 120);
-    for (const group of groups) {
-      await Promise.all(group.screenIds.map((screenId) => sendControl("interaction", "pulseScreen", screenId, screenId)));
-      if (groups.length > 1) await wait(sequenceDelay);
-    }
-  }, [sendControl, sequenceGroups, sequenceStep, snapshot]);
-
   const triggerInteractionMode = React.useCallback(async (mode: string) => {
     if (sequenceGroups.length === 0) {
       await sendControl("interaction", "setMode", "interaction-mode", mode);
@@ -882,6 +903,13 @@ function App() {
     showDebug: false,
     showMenu: false
   };
+  const fireworkState = snapshot.modules.interaction.fireworkState || "standby";
+  const fireworkStateLabel =
+    fireworkState === "launching"
+      ? ui.fireworkStates.launching
+      : fireworkState === "resetting"
+        ? ui.fireworkStates.resetting
+        : ui.fireworkStates.standby;
   const routeScreenIds = screenTopology.flatMap((row) => row).filter(Boolean);
   const pageCopy = ui.tabs[activeTab];
   const latestAck = lastAck || ui.status.waiting;
@@ -1174,57 +1202,123 @@ function App() {
                   </div>
                 )}
 
-                <div className="stage-actions">
-                  <button
-                    type="button"
-                    className={snapshot.modules.interaction.mode === "idle" ? "selected" : ""}
-                    onClick={() => triggerInteractionMode("idle")}
-                  >
-                    {ui.interactionModes.idle}
-                  </button>
-                  <button
-                    type="button"
-                    className={snapshot.modules.interaction.mode === "interaction" ? "selected" : ""}
-                    onClick={() => triggerInteractionMode("interaction")}
-                  >
-                    {ui.interactionModes.interaction}
-                  </button>
-                  <button
-                    type="button"
-                    className={snapshot.modules.interaction.mode === "flow" ? "selected" : ""}
-                    onClick={() => triggerInteractionMode("flow")}
-                  >
-                    {ui.interactionModes.flow}
-                  </button>
-                  <button
-                    type="button"
-                    className={snapshot.modules.interaction.mode === "climax" ? "selected" : ""}
-                    onClick={() => triggerInteractionMode("climax")}
-                  >
-                    {ui.interactionModes.climax}
-                  </button>
-                  <button type="button" onClick={pulseSelectedScreens}>
-                    <Zap size={15} /> {ui.actions.pulse}
-                  </button>
-                  <button type="button" onClick={() => {
-                    clearSequence();
-                    void sendControl("interaction", "resetTree", "tree", true);
-                  }}>
-                    {ui.actions.resetTree}
-                  </button>
-                  <button
-                    type="button"
-                    className={snapshot.modules.interaction.visualMode === "firework" ? "selected" : ""}
-                    onClick={() => sendControl(
-                      "interaction",
-                      "setVisualMode",
-                      "visual-mode",
-                      snapshot.modules.interaction.visualMode === "firework" ? "tree" : "firework"
-                    )}
-                  >
-                    <Sparkles size={15} /> {snapshot.modules.interaction.visualMode === "firework" ? "Firework" : "Tree"}
-                  </button>
+                <div className="stage-control-group">
+                  <div className="stage-control-head">
+                    <div>
+                      <p>Mode / 模式</p>
+                      <strong>{snapshot.modules.interaction.visualMode === "firework" ? "Fireworks / 烟花" : "Tree / 树"}</strong>
+                    </div>
+                    <div className="segmented-control" aria-label="Interaction mode">
+                      <button
+                        type="button"
+                        className={snapshot.modules.interaction.visualMode === "tree" ? "selected" : ""}
+                        onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
+                      >
+                        Tree
+                      </button>
+                      <button
+                        type="button"
+                        className={snapshot.modules.interaction.visualMode === "firework" ? "selected" : ""}
+                        onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
+                      >
+                        Fireworks
+                      </button>
+                    </div>
+                  </div>
                 </div>
+
+                {snapshot.modules.interaction.visualMode === "tree" ? (
+                  <div className="stage-control-group">
+                    <div className="stage-control-head">
+                      <div>
+                        <p>Tree / 树控制</p>
+                        <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong>
+                      </div>
+                      <span className="stage-control-status">
+                        {ui.interactionModes[snapshot.modules.interaction.mode]}
+                      </span>
+                    </div>
+                    <div className="stage-actions">
+                      <button
+                        type="button"
+                        className={snapshot.modules.interaction.mode === "idle" ? "selected" : ""}
+                        onClick={() => triggerInteractionMode("idle")}
+                      >
+                        {ui.interactionModes.idle}
+                      </button>
+                      <button
+                        type="button"
+                        className={snapshot.modules.interaction.mode === "flow" ? "selected" : ""}
+                        onClick={() => triggerInteractionMode("flow")}
+                      >
+                        {ui.interactionModes.flow}
+                      </button>
+                      <button
+                        type="button"
+                        className={snapshot.modules.interaction.mode === "interaction" ? "selected" : ""}
+                        onClick={() => triggerInteractionMode("interaction")}
+                      >
+                        {ui.interactionModes.interaction}
+                      </button>
+                      <button
+                        type="button"
+                        className={snapshot.modules.interaction.mode === "climax" ? "selected" : ""}
+                        onClick={() => triggerInteractionMode("climax")}
+                      >
+                        {ui.interactionModes.climax}
+                      </button>
+                    </div>
+                    <div className="stage-actions stage-actions--utility">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          clearSequence();
+                          resetTreeGrowth();
+                        }}
+                      >
+                        Reset tree / 重置树
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="stage-control-group">
+                    <div className="stage-control-head">
+                      <div>
+                        <p>Fireworks / 烟花控制</p>
+                        <strong>{ui.fireworkStates.status}</strong>
+                      </div>
+                      <span className={`stage-control-status stage-control-status--${fireworkState}`}>
+                        {fireworkStateLabel}
+                      </span>
+                    </div>
+                    <div className="stage-actions">
+                      <button
+                        type="button"
+                        className={fireworkState === "standby" ? "selected" : ""}
+                        onClick={standbyFireworks}
+                      >
+                        Standby / 待机
+                      </button>
+                      <button
+                        type="button"
+                        className={fireworkState === "launching" ? "selected" : ""}
+                        onClick={launchFireworks}
+                      >
+                        Launch / 燃放
+                      </button>
+                      <button
+                        type="button"
+                        className={fireworkState === "resetting" ? "selected" : ""}
+                        onClick={resetFireworks}
+                      >
+                        Reset / 重置
+                      </button>
+                      <span className="stage-control-chip">
+                        Status: {fireworkStateLabel}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
 

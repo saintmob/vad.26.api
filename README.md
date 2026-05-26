@@ -156,6 +156,22 @@ WebSocket 主要消息：
 - `state.patch`
 - `control.ack`
 
+常用远程控制命令：
+
+- `setMode`
+- `setIntensity`
+- `resetTree`
+- `setVisualMode`
+- `setScreen`
+- `pulseScreen`
+- `setScreenOwner`
+- `setScreenRoutePreset`
+- `setScreenAutoRedirect`
+- `setScreenMenuVisible`
+- `setScreenDebugVisible`
+- `setScreenPresentation`
+- `setFireworkState`
+
 ## 鉴权
 
 本地排练可以不设置 token。若设置：

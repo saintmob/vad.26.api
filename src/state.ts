@@ -23,7 +23,7 @@ export const SCREEN_IDS = [
   "C1", "C2", "C3", "C4",
   "D1", "D2", "D3",
   "E1", "F1",
-  "G1", "G2", "H1", "H2"
+  "L1", "L2", "R1", "R2"
 ] as const;
 
 const SCREEN_TOPOLOGY = [
@@ -31,8 +31,8 @@ const SCREEN_TOPOLOGY = [
   ["B1", "B2", "B3", "B4", "B5", "B6"],
   ["C1", "C2", "C3", "C4"],
   ["D1", "D2", "D3"],
-  ["G1", "E1", "H1"],
-  ["G2", "F1", "H2"]
+  ["L1", "E1", "R1"],
+  ["L2", "F1", "R2"]
 ];
 
 const VJ_SCREEN_IDS = new Set(["A1"]);
@@ -41,6 +41,12 @@ const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
   const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
   return origin ? `${origin.protocol}//${origin.host}` : null;
 })();
+
+function normalizeScreenOccupancyId(value: unknown) {
+  const screenId = String(value || "").trim();
+  if (!screenId) return "";
+  return screenId === "MASTER" ? "A1" : screenId;
+}
 
 export function isModuleName(value: unknown): value is ModuleName {
   return typeof value === "string" && MODULE_NAMES.includes(value as ModuleName);
@@ -146,13 +152,15 @@ function createDefaultInteractionModule(): InteractionModuleState {
     screenPresentation: {
       autoRedirect: true,
       showDebug: false,
-      showMenu: false
+      showMenu: false,
+      configured: false
     },
     screenId: "C2",
     role: "screen",
     overview: false,
     mode: "idle",
     visualMode: "tree",
+    fireworkState: "standby",
     intensity: 0.08,
     treeGrowth: 0,
     gestureActive: false,
@@ -256,6 +264,7 @@ function inferModule(command: string): ControlCommand["module"] {
     "setIntensity",
     "resetTree",
     "setVisualMode",
+    "setFireworkState",
     "pulseScreen",
     "setScreen",
     "setScreenOwner",
@@ -310,6 +319,12 @@ export class ShowStateStore {
       this.state.show.bpm = positiveNumber(patch.bpm, this.state.show.bpm);
     }
     if (moduleName === "interaction") {
+      const client = this.state.clients[String(source || "")];
+      if (client) {
+        if (typeof sanitizedPatch.screenId === "string") client.screenId = normalizeScreenOccupancyId(sanitizedPatch.screenId) || sanitizedPatch.screenId;
+        if (typeof sanitizedPatch.overview === "boolean") client.overview = sanitizedPatch.overview;
+        if (typeof sanitizedPatch.role === "string") client.role = sanitizedPatch.role;
+      }
       this.state.modules.interaction.screenTopology = normalizeScreenTopology(this.state.modules.interaction.screenTopology);
       this.state.modules.interaction.screenRegistry = normalizeScreenRegistry(this.state.modules.interaction.screenRegistry);
       const patchedPreset = normalizeScreenRoutePreset(sanitizedPatch.screenRoutePreset);
@@ -368,7 +383,9 @@ export class ShowStateStore {
       connectedAt: this.state.clients[message.clientId || fallbackId]?.connectedAt || now,
       lastSeen: now,
       latency: null,
-      capabilities: Array.isArray(message.capabilities) ? message.capabilities.map(String) : []
+      capabilities: Array.isArray(message.capabilities) ? message.capabilities.map(String) : [],
+      screenId: normalizeScreenOccupancyId(this.state.clients[message.clientId || fallbackId]?.screenId),
+      overview: this.state.clients[message.clientId || fallbackId]?.overview
     };
     this.state.clients[client.id] = client;
     this.touch();
@@ -501,11 +518,16 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as InteractionModuleState["visualMode"];
     }
+    if (command.command === "setFireworkState") {
+      const nextFireworkState = normalizeFireworkState(value);
+      state.modules.interaction.fireworkState = nextFireworkState;
+      state.modules.interaction.visualMode = "firework";
+    }
     if (command.command === "pulseScreen") {
       state.modules.interaction.screenPulse = { source: String(value || command.target), timestamp: Date.now() };
     }
     if (command.command === "setScreen") {
-      state.modules.interaction.screenId = String(value || command.target);
+      state.modules.interaction.screenId = normalizeScreenOccupancyId(value || command.target) || String(value || command.target);
       state.modules.interaction.role = ["MASTER", "A1"].includes(state.modules.interaction.screenId) ? "master" : "screen";
     }
     if (command.command === "setScreenOwner") {
@@ -525,17 +547,21 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     }
     if (command.command === "setScreenAutoRedirect") {
       state.modules.interaction.screenPresentation.autoRedirect = Boolean(value);
+      state.modules.interaction.screenPresentation.configured = true;
     }
     if (command.command === "setScreenDebugVisible") {
       state.modules.interaction.screenPresentation.showDebug = Boolean(value);
+      state.modules.interaction.screenPresentation.configured = true;
     }
     if (command.command === "setScreenMenuVisible") {
       state.modules.interaction.screenPresentation.showMenu = Boolean(value);
+      state.modules.interaction.screenPresentation.configured = true;
     }
     if (command.command === "setScreenPresentation" && isRecord(value)) {
       state.modules.interaction.screenPresentation = normalizeScreenPresentation({
         ...state.modules.interaction.screenPresentation,
-        ...value
+        ...value,
+        configured: true
       });
     }
   }
@@ -559,9 +585,15 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
   state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
   state.modules.interaction.screenPresentation = normalizeScreenPresentation(state.modules.interaction.screenPresentation);
+  state.modules.interaction.screenId = normalizeScreenOccupancyId(state.modules.interaction.screenId) || state.modules.interaction.screenId;
+  state.modules.interaction.role = ["MASTER", "A1"].includes(state.modules.interaction.screenId) ? "master" : "screen";
   state.modules.interaction.visualMode = ["tree", "firework"].includes(String(state.modules.interaction.visualMode))
     ? state.modules.interaction.visualMode
     : "tree";
+  state.modules.interaction.fireworkState = normalizeFireworkState(state.modules.interaction.fireworkState);
+  if (state.modules.interaction.fireworkState !== "standby") {
+    state.modules.interaction.visualMode = "firework";
+  }
   state.modules.interaction.screenRoutes = normalizeScreenRoutes(
     state.modules.interaction.screenRoutes,
     state.modules.interaction.screenRoutePreset
@@ -609,8 +641,22 @@ function normalizeScreenPresentation(value: unknown): InteractionModuleState["sc
   return {
     autoRedirect: typeof record.autoRedirect === "boolean" ? record.autoRedirect : true,
     showDebug: typeof record.showDebug === "boolean" ? record.showDebug : false,
-    showMenu: typeof record.showMenu === "boolean" ? record.showMenu : false
+    showMenu: typeof record.showMenu === "boolean" ? record.showMenu : false,
+    configured: typeof record.configured === "boolean" ? record.configured : false
   };
+}
+
+function normalizeFireworkState(value: unknown) {
+  return ["standby", "launching", "resetting"].includes(String(value)) ? String(value) as InteractionModuleState["fireworkState"] : "standby";
+}
+
+function isLoopbackOrigin(origin: unknown) {
+  try {
+    const url = new URL(String(origin || ""));
+    return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function createDefaultScreenRegistry() {
@@ -679,6 +725,27 @@ export function resolveStateScreenRoutes(state: PerformanceState, origin: string
       interaction: {
         ...state.modules.interaction,
         screenRoutes
+      }
+    }
+  };
+}
+
+export function resolveStateScreenPresentation(state: PerformanceState, origin: string | null | undefined): PerformanceState {
+  const presentation = state.modules.interaction.screenPresentation;
+  if (presentation.configured) return state;
+
+  const isLocal = isLoopbackOrigin(origin);
+  return {
+    ...state,
+    modules: {
+      ...state.modules,
+      interaction: {
+        ...state.modules.interaction,
+        screenPresentation: {
+          ...presentation,
+          showMenu: isLocal,
+          showDebug: isLocal
+        }
       }
     }
   };
@@ -776,7 +843,7 @@ function normalizeScreenTopology(value: unknown): string[][] {
 }
 
 function hasLegacySideScreenIds(screenIds: string[]) {
-  return screenIds.some((screenId) => ["L1", "L2", "R1", "R2"].includes(screenId));
+  return screenIds.some((screenId) => ["G1", "G2", "H1", "H2"].includes(screenId));
 }
 
 function clampUnit(value: unknown, fallback = 0) {

@@ -953,6 +953,73 @@ input::placeholder {
   gap: 6px;
 }
 
+.stage-actions--utility {
+  justify-content: flex-start;
+}
+
+.stage-control-group {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, white 16%);
+  border-radius: calc(var(--radius) + 2px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 96%, white 4%), var(--surface));
+  box-shadow: var(--shadow);
+}
+
+.stage-control-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.stage-control-head p {
+  margin: 0;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stage-control-head strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.stage-control-status,
+.stage-control-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 72%, black 28%);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.stage-control-status--standby {
+  border-color: color-mix(in srgb, var(--muted) 60%, white 40%);
+}
+
+.stage-control-status--launching {
+  border-color: color-mix(in srgb, var(--accent) 65%, white 35%);
+  background: color-mix(in srgb, var(--accent) 18%, black 82%);
+}
+
+.stage-control-status--resetting {
+  border-color: color-mix(in srgb, var(--accent) 65%, white 35%);
+  background: color-mix(in srgb, var(--accent) 14%, black 86%);
+}
+
 .screen-stage {
   min-height: 0;
   display: grid;

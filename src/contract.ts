@@ -91,7 +91,16 @@ export const performanceSpec = {
             "setMode",
             "setIntensity",
             "setOperationLock",
-            "pulseScreen"
+            "pulseScreen",
+            "setScreen",
+            "setVisualMode",
+            "setScreenOwner",
+            "setScreenRoutePreset",
+            "setScreenAutoRedirect",
+            "setScreenMenuVisible",
+            "setScreenDebugVisible",
+            "setScreenPresentation",
+            "setFireworkState"
           ]
         },
         value: { description: "Command-specific payload" },
