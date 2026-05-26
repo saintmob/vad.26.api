@@ -275,7 +275,7 @@ function inferModule(command: string): ControlCommand["module"] {
     "setScreenPresentation",
     "setOperationLock"
   ].includes(command)) return "interaction";
-  if (["play", "pause", "reset", "setBpm", "seek"].includes(command)) return "show";
+  if (["play", "pause", "stop", "reset", "setBpm", "seek"].includes(command)) return "show";
   if (command === "focusVideo") return "video";
   if (command === "setGuestOnStage") return "guest";
   return "show";
@@ -446,8 +446,14 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.show.status = "paused";
       state.modules.audio.transport = "paused";
     }
+    if (command.command === "stop") {
+      state.show.status = "ended";
+      state.show.startedAt = null;
+      state.modules.audio.transport = "stopped";
+    }
     if (command.command === "reset") {
       state.show.status = "standby";
+      state.show.startedAt = null;
       state.show.positionMs = 0;
       state.show.beat = 0;
       state.show.bar = 1;

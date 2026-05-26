@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   Aperture,
   AudioLines,
-  Database,
   Grid3X3,
   ListChecks,
   MonitorCog,
@@ -13,8 +12,11 @@ import {
   RotateCcw,
   Save,
   Send,
+  Settings2,
   SlidersHorizontal,
   Sparkles,
+  Square,
+  X,
   Type
 } from "lucide-react";
 import type { ControlCommand, ModuleName, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
@@ -55,6 +57,8 @@ type UiCopy = {
     appearance: string;
     access: string;
     advanced: string;
+    systemSettings: string;
+    transport: string;
     quickActions: string;
     collapse: string;
     expand: string;
@@ -67,6 +71,7 @@ type UiCopy = {
   actions: {
     play: string;
     pause: string;
+    stop: string;
     reset: string;
     save: string;
     pulse: string;
@@ -138,10 +143,7 @@ const storageKeys = {
   token: "vad-control-token",
   tab: "vad-dashboard-tab",
   theme: "vad-theme-mode",
-  language: "vad-language-mode",
-  leftRail: "vad-layout-left-rail",
-  rightRail: "vad-layout-right-rail",
-  logs: "vad-layout-logs"
+  language: "vad-language-mode"
 } as const;
 
 type ServerMessage =
@@ -214,6 +216,8 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       appearance: "外观",
       access: "访问",
       advanced: "高级",
+      systemSettings: "系统设置",
+      transport: "播放快速控制",
       quickActions: "快速操作",
       collapse: "收起",
       expand: "展开"
@@ -248,6 +252,7 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     actions: {
       play: "播放",
       pause: "暂停",
+      stop: "停止",
       reset: "重置",
       save: "保存",
       pulse: "脉冲",
@@ -360,6 +365,8 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       appearance: "Appearance",
       access: "Access",
       advanced: "Advanced",
+      systemSettings: "System settings",
+      transport: "Playback quick controls",
       quickActions: "Quick actions",
       collapse: "Collapse",
       expand: "Expand"
@@ -394,6 +401,7 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     actions: {
       play: "Play",
       pause: "Pause",
+      stop: "Stop",
       reset: "Reset",
       save: "Save",
       pulse: "Pulse",
@@ -561,9 +569,7 @@ function App() {
   const [activeTab, setActiveTab] = React.useState<DashboardTab>(() => readStoredValue(storageKeys.tab, "interaction"));
   const [themeMode, setThemeMode] = React.useState<ThemeMode>(() => readStoredValue(storageKeys.theme, "system"));
   const [languageMode, setLanguageMode] = React.useState<LanguageMode>(() => readStoredValue(storageKeys.language, "system"));
-  const [leftRailOpen, setLeftRailOpen] = React.useState(() => readStoredBoolean(storageKeys.leftRail, false));
-  const [rightRailOpen, setRightRailOpen] = React.useState(() => readStoredBoolean(storageKeys.rightRail, false));
-  const [logsOpen, setLogsOpen] = React.useState(() => readStoredBoolean(storageKeys.logs, false));
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [prefersDark, setPrefersDark] = React.useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [systemLanguage, setSystemLanguage] = React.useState<UiLanguage>(() => resolveBrowserLanguage());
   const firebaseClientRef = React.useRef<ReturnType<typeof createFirebaseDashboardClient> | null>(null);
@@ -586,16 +592,13 @@ function App() {
   }, [languageMode]);
 
   React.useEffect(() => {
-    window.localStorage.setItem(storageKeys.leftRail, leftRailOpen ? "1" : "0");
-  }, [leftRailOpen]);
-
-  React.useEffect(() => {
-    window.localStorage.setItem(storageKeys.rightRail, rightRailOpen ? "1" : "0");
-  }, [rightRailOpen]);
-
-  React.useEffect(() => {
-    window.localStorage.setItem(storageKeys.logs, logsOpen ? "1" : "0");
-  }, [logsOpen]);
+    if (!settingsOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSettingsOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [settingsOpen]);
 
   React.useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -777,20 +780,6 @@ function App() {
     }
   }, [postJson]);
 
-  const resetShow = React.useCallback(async () => {
-    try {
-      if (shouldUseFirebaseRealtime() && firebaseClientRef.current) {
-        await firebaseClientRef.current.resetShow();
-        return;
-      }
-      const result = await postJson<{ state: PerformanceState }>("/api/show/reset", {});
-      setSnapshot(result.state);
-      setLastAck("Show reset");
-    } catch (error) {
-      setLastAck(error instanceof Error ? error.message : String(error));
-    }
-  }, [postJson]);
-
   const sequenceOrderByScreen = React.useMemo(() => {
     const orders = new Map<string, number>();
     sequenceGroups.forEach((group) => {
@@ -894,6 +883,16 @@ function App() {
 
   const show = snapshot.show;
   const clients = Object.values(snapshot.clients);
+  const routeClientsByScreenId = new Map<string, Array<PerformanceState["clients"][string]>>();
+  for (const client of clients) {
+    if (client.status !== "online" || !client.screenId) continue;
+    const screenId = normalizeScreenOccupancyId(client.screenId);
+    if (!screenId) continue;
+    const current = routeClientsByScreenId.get(screenId) || [];
+    current.push(client);
+    routeClientsByScreenId.set(screenId, current);
+  }
+  const unassignedClients = clients.filter((client) => client.status === "online" && !client.screenId);
   const audioSources = Object.values(snapshot.audioSources).sort((a, b) => b.level - a.level);
   const activeSource = snapshot.audioSources[snapshot.modules.audio.activeSourceId] || audioSources[0];
   const screenTopology = normalizeScreenTopology(snapshot.modules.interaction.screenTopology);
@@ -915,8 +914,7 @@ function App() {
   const latestAck = lastAck || ui.status.waiting;
   const showStatusLabel = ui.show[show.status];
   const interactionLayoutStyle = {
-    "--left-rail-width": leftRailOpen ? "286px" : "44px",
-    "--right-rail-width": rightRailOpen ? "360px" : "44px"
+    "--right-rail-width": "clamp(360px, 25vw, 460px)"
   } as React.CSSProperties;
 
   return (
@@ -945,30 +943,75 @@ function App() {
                 <span>{showStatusLabel}</span>
               </div>
             </div>
+            <div className="status-chip">
+              <div>
+                <strong>{ui.app.clients}</strong>
+                <span>{clients.length}</span>
+              </div>
+            </div>
+            <div className="status-chip">
+              <div>
+                <strong>{ui.app.ack}</strong>
+                <span>{latestAck}</span>
+              </div>
+            </div>
           </div>
+
+          <button
+            type="button"
+            className="meta-icon-button"
+            aria-label={ui.layout.systemSettings}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings2 size={16} />
+          </button>
         </div>
       </header>
 
-      <nav className="tab-strip" aria-label={ui.app.activeTab}>
-        {tabDefinitions.map((tab) => {
-          const tabText = ui.tabs[tab.key];
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              className={activeTab === tab.key ? "tab-button selected" : "tab-button"}
-              style={{ "--accent": tab.accent } as React.CSSProperties}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.icon}
-              <span>
-                <strong>{tabText.label}</strong>
-                <small>{tabText.detail}</small>
-              </span>
+      <section className="console-dock">
+        <nav className="tab-strip" aria-label={ui.app.activeTab}>
+          {tabDefinitions.map((tab) => {
+            const tabText = ui.tabs[tab.key];
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                className={activeTab === tab.key ? "tab-button selected" : "tab-button"}
+                style={{ "--accent": tab.accent } as React.CSSProperties}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.icon}
+                <span>
+                  <strong>{tabText.label}</strong>
+                  <small>{tabText.detail}</small>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <section className="playback-bar" aria-label={ui.layout.transport}>
+          <div className="playback-bar__copy">
+            <p>{ui.layout.transport}</p>
+            <strong>{showStatusLabel}</strong>
+            <span>{show.id} · {show.bpm} BPM · {formatMs(show.positionMs)}</span>
+          </div>
+          <div className="playback-bar__actions">
+            <button type="button" className={show.status === "running" ? "selected" : ""} onClick={() => sendControl("show", "play", show.id)}>
+              <Play size={16} /> {ui.actions.play}
             </button>
-          );
-        })}
-      </nav>
+            <button type="button" className={show.status === "paused" ? "selected" : ""} onClick={() => sendControl("show", "pause", show.id)}>
+              <Pause size={16} /> {ui.actions.pause}
+            </button>
+            <button type="button" className={show.status === "ended" ? "selected" : ""} onClick={() => sendControl("show", "stop", show.id)}>
+              <Square size={16} /> {ui.actions.stop}
+            </button>
+            <button type="button" onClick={() => sendControl("show", "reset", show.id)}>
+              <RotateCcw size={16} /> {ui.actions.reset}
+            </button>
+          </div>
+        </section>
+      </section>
 
       <section className="console-body">
         <div className={activeTab === "interaction" ? "page-meta page-meta--interaction" : "page-meta"}>
@@ -977,119 +1020,10 @@ function App() {
             <h1>{pageCopy.label}</h1>
             <span>{pageCopy.detail}</span>
           </div>
-          <div className="page-meta__stack">
-            <span>{ui.app.clients}: {clients.length}</span>
-            <span>{ui.app.ack}: {latestAck}</span>
-          </div>
         </div>
 
         {activeTab === "interaction" ? (
           <section className="workspace-grid workspace-grid--interaction" style={interactionLayoutStyle}>
-            <aside className={`interaction-rail interaction-rail--left ${leftRailOpen ? "open" : "collapsed"}`}>
-              <div className="rail-shell">
-                <div className="rail-header">
-                  <div>
-                    <p>{ui.layout.workspace}</p>
-                    <strong>{leftRailOpen ? ui.layout.collapse : ui.layout.expand}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    className="rail-toggle"
-                    aria-expanded={leftRailOpen}
-                    aria-label={leftRailOpen ? ui.layout.collapse : ui.layout.expand}
-                    onClick={() => setLeftRailOpen((value) => !value)}
-                  >
-                    {leftRailOpen ? "‹" : "›"}
-                  </button>
-                </div>
-
-                {leftRailOpen ? (
-                  <div className="rail-stack">
-                    <section className="rail-section">
-                      <div className="rail-section__head">
-                        <h2>{ui.layout.appearance}</h2>
-                      </div>
-                      <div className="segmented-control" aria-label={ui.app.theme}>
-                        {(["system", "light", "dark"] as ThemeMode[]).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            className={themeMode === mode ? "selected" : ""}
-                            onClick={() => setThemeMode(mode)}
-                          >
-                            {ui.theme[mode]}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="segmented-control" aria-label={ui.app.language}>
-                        {(["system", "zh", "en"] as LanguageMode[]).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            className={languageMode === mode ? "selected" : ""}
-                            onClick={() => setLanguageMode(mode)}
-                          >
-                            {ui.language[mode]}
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-
-                    <section className="rail-section">
-                      <div className="rail-section__head">
-                        <h2>{ui.layout.access}</h2>
-                      </div>
-                      <label className="token-field token-field--stacked">
-                        <span>{ui.app.token}</span>
-                        <input
-                          value={token}
-                          onChange={(event) => setToken(event.target.value)}
-                          placeholder="optional"
-                          type="password"
-                        />
-                      </label>
-                    </section>
-
-                    <section className="rail-section">
-                      <div className="rail-section__head">
-                        <h2>{ui.layout.advanced}</h2>
-                      </div>
-                      <div className="screen-presentation-controls" aria-label={ui.interaction.presentation}>
-                        <button
-                          type="button"
-                          className={screenPresentation.autoRedirect ? "selected" : ""}
-                          onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
-                        >
-                          {ui.interaction.autoRedirect}
-                        </button>
-                        <button
-                          type="button"
-                          className={screenPresentation.showMenu ? "selected" : ""}
-                          onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
-                        >
-                          {ui.interaction.showMenu}
-                        </button>
-                        <button
-                          type="button"
-                          className={screenPresentation.showDebug ? "selected" : ""}
-                          onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
-                        >
-                          {ui.interaction.showDebug}
-                        </button>
-                        <button type="button" onClick={saveSnapshot}>
-                          <Save size={15} /> {ui.actions.save}
-                        </button>
-                      </div>
-                    </section>
-                  </div>
-                ) : (
-                  <div className="rail-collapsed-note">
-                    <span>{ui.layout.workspace}</span>
-                  </div>
-                )}
-              </div>
-            </aside>
-
             <section className="interaction-stage">
               <div className="stage-head">
                 <div>
@@ -1113,12 +1047,6 @@ function App() {
                   ))}
                 </div>
 
-                <div className="button-row">
-                  <button type="button" onClick={() => sendControl("show", "play", show.id, true)}><Play size={16} /> {ui.actions.play}</button>
-                  <button type="button" onClick={() => sendControl("show", "pause", show.id, false)}><Pause size={16} /> {ui.actions.pause}</button>
-                  <button type="button" onClick={resetShow}><RotateCcw size={16} /> {ui.actions.reset}</button>
-                </div>
-
                 <div className="screen-tools">
                   {screenSelectionModes.map((mode) => (
                     <button
@@ -1137,6 +1065,36 @@ function App() {
                   {sequenceGroups.length > 0 && (
                     <button type="button" onClick={clearSequence}>{ui.actions.clearSequence}</button>
                   )}
+                </div>
+
+                <div className="presentation-controls" aria-label={ui.interaction.presentation}>
+                  <span className="presentation-controls__label">{ui.layout.quickActions}</span>
+                  <div className="presentation-controls__buttons">
+                    <button
+                      type="button"
+                      className={screenPresentation.autoRedirect ? "selected" : ""}
+                      onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
+                    >
+                      {ui.interaction.autoRedirect}
+                    </button>
+                    <button
+                      type="button"
+                      className={screenPresentation.showMenu ? "selected" : ""}
+                      onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
+                    >
+                      {ui.interaction.showMenu}
+                    </button>
+                    <button
+                      type="button"
+                      className={screenPresentation.showDebug ? "selected" : ""}
+                      onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
+                    >
+                      {ui.interaction.showDebug}
+                    </button>
+                    <button type="button" onClick={saveSnapshot}>
+                      <Save size={15} /> {ui.actions.save}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1322,80 +1280,74 @@ function App() {
               </div>
             </section>
 
-            <aside className={`interaction-rail interaction-rail--right ${rightRailOpen ? "open" : "collapsed"}`}>
+            <aside className="interaction-rail interaction-rail--right">
               <div className="rail-shell">
                 <div className="rail-header">
                   <div>
                     <p>{ui.layout.routes}</p>
-                    <strong>{rightRailOpen ? ui.layout.collapse : ui.layout.expand}</strong>
+                    <strong>{ui.interaction.routeRegister}</strong>
                   </div>
-                  <button
-                    type="button"
-                    className="rail-toggle"
-                    aria-expanded={rightRailOpen}
-                    aria-label={rightRailOpen ? ui.layout.collapse : ui.layout.expand}
-                    onClick={() => setRightRailOpen((value) => !value)}
-                  >
-                    {rightRailOpen ? "›" : "‹"}
-                  </button>
+                  <span className="rail-header__meta">{routeScreenIds.length}</span>
                 </div>
 
-                {rightRailOpen ? (
-                  <div className="route-table route-table--rail">
-                  {routeScreenIds.map((screenId) => {
-                      const route = screenRoutes[screenId];
-                      return (
-                        <article key={screenId}>
+                <div className="rail-stack rail-stack--right">
+                  <section className="route-board">
+                    <div className="route-board__head">
+                      <div>
+                        <p>{ui.interaction.routeRegister}</p>
+                        <strong>{ui.interaction.routeHint}</strong>
+                      </div>
+                      <span>{routeScreenIds.length}</span>
+                    </div>
+
+                    <div className="route-table route-table--rail">
+                      {routeScreenIds.map((screenId) => {
+                        const route = screenRoutes[screenId];
+                        const routeClients = routeClientsByScreenId.get(screenId) || [];
+                        return (
+                          <article key={screenId}>
+                            <div>
+                              <strong>{screenId}</strong>
+                              <span>{route?.url || "Route URL unavailable"}</span>
+                              <small>{route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"}</small>
+                              <small className="route-client-line">
+                                {ui.interaction.clients}: {routeClients.length > 0
+                                  ? routeClients.map((client) => client.id).join(" · ")
+                                  : locale === "zh"
+                                    ? "暂无在线设备"
+                                    : "No live device"}
+                              </small>
+                            </div>
+                            <div className="owner-switch" aria-label={`${screenId} owner`}>
+                              {screenOwners.map((owner) => (
+                                <button
+                                  key={owner.value}
+                                  type="button"
+                                  className={route?.owner === owner.value ? `selected owner-${owner.value}` : ""}
+                                  onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
+                                >
+                                  {ui.screenOwners[owner.value]}
+                                </button>
+                              ))}
+                            </div>
+                          </article>
+                        );
+                      })}
+
+                      {unassignedClients.length > 0 && (
+                        <article className="route-table__unassigned">
                           <div>
-                            <strong>{screenId}</strong>
-                            <span>{route?.url || "Route URL unavailable"}</span>
-                            <small>{route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"}</small>
-                          </div>
-                          <div className="owner-switch" aria-label={`${screenId} owner`}>
-                            {screenOwners.map((owner) => (
-                              <button
-                                key={owner.value}
-                                type="button"
-                                className={route?.owner === owner.value ? `selected owner-${owner.value}` : ""}
-                                onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
-                              >
-                                {ui.screenOwners[owner.value]}
-                              </button>
-                            ))}
+                            <strong>{locale === "zh" ? "未绑定设备" : "Unassigned devices"}</strong>
+                            <span>{unassignedClients.map((client) => client.id).join(" · ")}</span>
+                            <small>{ui.interaction.clients}</small>
                           </div>
                         </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rail-collapsed-note">
-                    <span>{ui.layout.routes}</span>
-                  </div>
-                )}
-              </div>
-            </aside>
+                      )}
+                    </div>
+                  </section>
 
-            <section className={`interaction-logs ${logsOpen ? "open" : "collapsed"}`}>
-              <div className="logs-head">
-                <div>
-                  <p>{ui.layout.logs}</p>
-                  <strong>{snapshot.eventLog.length} · {clients.length}</strong>
-                </div>
-                <button
-                  type="button"
-                  className="rail-toggle"
-                  aria-expanded={logsOpen}
-                  aria-label={logsOpen ? ui.layout.collapse : ui.layout.expand}
-                  onClick={() => setLogsOpen((value) => !value)}
-                >
-                  {logsOpen ? "▾" : "▴"}
-                </button>
-              </div>
-
-              {logsOpen && (
-                <div className="logs-grid">
                   <Panel title={ui.interaction.eventLog} icon={<ListChecks size={18} />} compact>
-                    <div className="event-list">
+                    <div className="event-list event-list--compact">
                       {snapshot.eventLog.slice(0, 8).map((event) => (
                         <article key={event.id}>
                           <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
@@ -1405,22 +1357,9 @@ function App() {
                       ))}
                     </div>
                   </Panel>
-
-                  <Panel title={ui.interaction.clients} icon={<Database size={18} />} compact>
-                    <div className="client-list">
-                      {clients.length === 0 && <p className="empty">{locale === "zh" ? "尚未有模块客户端宣布在线。" : "No module clients have announced presence."}</p>}
-                      {clients.map((client) => (
-                        <article key={client.id}>
-                          <strong>{client.id}</strong>
-                          <span>{client.module} · {client.role}</span>
-                          <small>{new Date(client.lastSeen).toLocaleTimeString()}</small>
-                        </article>
-                      ))}
-                    </div>
-                  </Panel>
                 </div>
-              )}
-            </section>
+              </div>
+            </aside>
           </section>
         ) : activeTab === "visual" ? (
           <section className="workspace-grid workspace-grid--module">
@@ -1493,31 +1432,6 @@ function App() {
                   ))}
                 </div>
               </Panel>
-
-              <Panel title={ui.interaction.eventLog} icon={<ListChecks size={18} />} compact>
-                <div className="event-list">
-                  {snapshot.eventLog.slice(0, 8).map((event) => (
-                    <article key={event.id}>
-                      <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                      <strong>{event.type}</strong>
-                      <p>{event.message}</p>
-                    </article>
-                  ))}
-                </div>
-              </Panel>
-
-              <Panel title={ui.interaction.clients} icon={<Database size={18} />} compact>
-                <div className="client-list">
-                  {clients.length === 0 && <p className="empty">{locale === "zh" ? "尚未有模块客户端宣布在线。" : "No module clients have announced presence."}</p>}
-                  {clients.map((client) => (
-                    <article key={client.id}>
-                      <strong>{client.id}</strong>
-                      <span>{client.module} · {client.role}</span>
-                      <small>{new Date(client.lastSeen).toLocaleTimeString()}</small>
-                    </article>
-                  ))}
-                </div>
-              </Panel>
             </div>
           </section>
         ) : (
@@ -1581,35 +1495,102 @@ function App() {
                   </div>
                 </div>
               </Panel>
-
-              <Panel title={ui.interaction.eventLog} icon={<ListChecks size={18} />} compact>
-                <div className="event-list">
-                  {snapshot.eventLog.slice(0, 8).map((event) => (
-                    <article key={event.id}>
-                      <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                      <strong>{event.type}</strong>
-                      <p>{event.message}</p>
-                    </article>
-                  ))}
-                </div>
-              </Panel>
-
-              <Panel title={ui.interaction.clients} icon={<Database size={18} />} compact>
-                <div className="client-list">
-                  {clients.length === 0 && <p className="empty">{locale === "zh" ? "尚未有模块客户端宣布在线。" : "No module clients have announced presence."}</p>}
-                  {clients.map((client) => (
-                    <article key={client.id}>
-                      <strong>{client.id}</strong>
-                      <span>{client.module} · {client.role}</span>
-                      <small>{new Date(client.lastSeen).toLocaleTimeString()}</small>
-                    </article>
-                  ))}
-                </div>
-              </Panel>
             </div>
           </section>
         )}
       </section>
+
+      {settingsOpen && (
+        <div
+          className="settings-backdrop"
+          role="presentation"
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            className="settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="settings-dialog__head">
+              <div>
+                <p>{ui.layout.systemSettings}</p>
+                <h2 id="settings-dialog-title">{ui.layout.systemSettings}</h2>
+                <span>
+                  {locale === "zh"
+                    ? "系统外观、语言和控制令牌集中在这里，主面板只保留高频操作。"
+                    : "Theme, language, and control token are centralized here. The main deck keeps only high-frequency actions."}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label={locale === "zh" ? "关闭" : "Close"}
+                onClick={() => setSettingsOpen(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="settings-dialog__grid">
+              <section className="settings-block">
+                <div className="settings-block__head">
+                  <h3>{ui.layout.appearance}</h3>
+                  <span>{ui.app.theme}</span>
+                </div>
+                <div className="segmented-control segmented-control--stretch" aria-label={ui.app.theme}>
+                  {(["system", "light", "dark"] as ThemeMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={themeMode === mode ? "selected" : ""}
+                      onClick={() => setThemeMode(mode)}
+                    >
+                      {ui.theme[mode]}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="settings-block">
+                <div className="settings-block__head">
+                  <h3>{ui.app.language}</h3>
+                  <span>{ui.app.system}</span>
+                </div>
+                <div className="segmented-control segmented-control--stretch" aria-label={ui.app.language}>
+                  {(["system", "zh", "en"] as LanguageMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={languageMode === mode ? "selected" : ""}
+                      onClick={() => setLanguageMode(mode)}
+                    >
+                      {ui.language[mode]}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="settings-block settings-block--wide">
+                <div className="settings-block__head">
+                  <h3>{ui.app.token}</h3>
+                  <span>{locale === "zh" ? "可选" : "Optional"}</span>
+                </div>
+                <label className="token-field token-field--stacked">
+                  <span>{ui.app.token}</span>
+                  <input
+                    value={token}
+                    onChange={(event) => setToken(event.target.value)}
+                    placeholder="optional"
+                    type="password"
+                  />
+                </label>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

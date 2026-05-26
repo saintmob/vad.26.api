@@ -202,8 +202,14 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
       patch["show/status"] = "paused";
       patch["modules/audio/transport"] = "paused";
     }
+    if (command.command === "stop") {
+      patch["show/status"] = "ended";
+      patch["show/startedAt"] = null;
+      patch["modules/audio/transport"] = "stopped";
+    }
     if (command.command === "reset") {
       patch["show/status"] = "standby";
+      patch["show/startedAt"] = null;
       patch["show/positionMs"] = 0;
       patch["show/beat"] = 0;
       patch["show/bar"] = 1;

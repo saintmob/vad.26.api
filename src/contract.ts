@@ -83,6 +83,7 @@ export const performanceSpec = {
           examples: [
             "play",
             "pause",
+            "stop",
             "reset",
             "setBpm",
             "setPreset",

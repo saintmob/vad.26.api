@@ -19,6 +19,15 @@ async function withServer(fn: (baseUrl: string, server: http.Server) => Promise<
   }
 }
 
+function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string) {
+  const url = new URL(baseUrl);
+  url.port = String(port);
+  url.pathname = `/screen/${screenId}`;
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
 test("serves API spec and initial state", async () => {
   await withServer(async (baseUrl) => {
     const spec = await fetch(`${baseUrl}/api/spec`).then((res) => res.json());
@@ -35,11 +44,11 @@ test("serves API spec and initial state", async () => {
     assert.equal(Object.keys(state.modules.interaction.screenRoutes).length, 20);
     assert.equal(state.modules.interaction.screenRoutes.A1.owner, "vj");
     assert.equal(state.modules.interaction.screenRoutes.B1.owner, "baofa");
-    assert.equal(state.modules.interaction.screenRoutes.A1.url, "http://localhost:4302/screen/A1");
-    assert.equal(state.modules.interaction.screenRoutes.H2.url, "http://localhost:4303/screen/H2");
+    assert.equal(state.modules.interaction.screenRoutes.A1.url, expectedScreenRouteUrl(baseUrl, 4302, "A1"));
+    assert.equal(state.modules.interaction.screenRoutes.R2.url, expectedScreenRouteUrl(baseUrl, 4303, "R2"));
     assert.equal(state.modules.interaction.screenPresentation.autoRedirect, true);
-    assert.equal(state.modules.interaction.screenPresentation.showDebug, false);
-    assert.equal(state.modules.interaction.screenPresentation.showMenu, false);
+    assert.equal(state.modules.interaction.screenPresentation.showDebug, true);
+    assert.equal(state.modules.interaction.screenPresentation.showMenu, true);
   }, { loadSnapshot: false });
 });
 
@@ -82,7 +91,7 @@ test("updates screen route preset and individual screen owners", async () => {
   });
 });
 
-test("accepts interaction module patch for screen route preset", async () => {
+test("ignores screenRoutePreset in interaction module patch and keeps the current route preset", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
       method: "POST",
@@ -95,9 +104,9 @@ test("accepts interaction module patch for screen route preset", async () => {
     const body = await response.json();
 
     assert.equal(response.status, 202);
-    assert.equal(body.state.modules.interaction.screenRoutePreset, "baofa_takeover");
-    assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "baofa");
-    assert.equal(body.state.modules.interaction.screenRoutes.H2.url, "http://localhost:4303/screen/H2");
+    assert.equal(body.state.modules.interaction.screenRoutePreset, "balanced");
+    assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "vj");
+    assert.equal(body.state.modules.interaction.screenRoutes.R2.url, expectedScreenRouteUrl(baseUrl, 4303, "R2"));
   });
 });
 
@@ -253,11 +262,11 @@ test("migrates legacy side screen topology ids", async () => {
       ["B1", "B2", "B3", "B4", "B5", "B6"],
       ["C1", "C2", "C3", "C4"],
       ["D1", "D2", "D3"],
-      ["G1", "E1", "H1"],
-      ["G2", "F1", "H2"]
+      ["L1", "E1", "R1"],
+      ["L2", "F1", "R2"]
     ]);
     assert.equal(body.state.modules.interaction.screenTopology[0][0], "A1");
-    assert.equal(body.state.modules.interaction.screenTopology.flat().includes("G1"), true);
+    assert.equal(body.state.modules.interaction.screenTopology.flat().includes("L1"), true);
   });
 });
 
@@ -474,6 +483,29 @@ test("resets show state", async () => {
     assert.equal(reset.status, 202);
     assert.equal(body.state.show.status, "standby");
     assert.equal(body.state.show.positionMs, 0);
+    assert.equal(body.state.modules.audio.transport, "stopped");
+  });
+});
+
+test("stops show state without clearing the transport reset semantics", async () => {
+  await withServer(async (baseUrl) => {
+    const play = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ module: "show", target: "show-main", command: "play" })
+    });
+    assert.equal(play.status, 202);
+
+    const stop = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ module: "show", target: "show-main", command: "stop" })
+    });
+    const body = await stop.json();
+
+    assert.equal(stop.status, 202);
+    assert.equal(body.state.show.status, "ended");
+    assert.equal(body.state.show.startedAt, null);
     assert.equal(body.state.modules.audio.transport, "stopped");
   });
 });
