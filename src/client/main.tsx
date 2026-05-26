@@ -4,7 +4,6 @@ import {
   Aperture,
   AudioLines,
   Grid3X3,
-  ListChecks,
   MonitorCog,
   Pause,
   Play,
@@ -566,6 +565,7 @@ function App() {
   const [sequenceStep, setSequenceStep] = React.useState<SequenceStep>("1/4");
   const [sequenceGroups, setSequenceGroups] = React.useState<SequenceGroup[]>([]);
   const [dragBox, setDragBox] = React.useState<DragBox | null>(null);
+  const [eventLogExpanded, setEventLogExpanded] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<DashboardTab>(() => readStoredValue(storageKeys.tab, "interaction"));
   const [themeMode, setThemeMode] = React.useState<ThemeMode>(() => readStoredValue(storageKeys.theme, "system"));
   const [languageMode, setLanguageMode] = React.useState<LanguageMode>(() => readStoredValue(storageKeys.language, "system"));
@@ -910,11 +910,21 @@ function App() {
         ? ui.fireworkStates.resetting
         : ui.fireworkStates.standby;
   const routeScreenIds = screenTopology.flatMap((row) => row).filter(Boolean);
+  const routeCount = routeScreenIds.length;
+  const clientCount = clients.length;
+  const eventCount = snapshot.eventLog.length;
+  const visibleEventLog = eventLogExpanded ? snapshot.eventLog : snapshot.eventLog.slice(0, 6);
+  const summarizeClientIds = (items: Array<{ id: string }>, emptyLabel: string) => {
+    if (items.length === 0) return emptyLabel;
+    const clientIds = items.map((item) => item.id);
+    const head = clientIds.slice(0, 2).join(" · ");
+    return clientIds.length > 2 ? `${head} +${clientIds.length - 2}` : head;
+  };
   const pageCopy = ui.tabs[activeTab];
   const latestAck = lastAck || ui.status.waiting;
   const showStatusLabel = ui.show[show.status];
   const interactionLayoutStyle = {
-    "--right-rail-width": "clamp(360px, 25vw, 460px)"
+    "--right-rail-width": "clamp(330px, 23vw, 390px)"
   } as React.CSSProperties;
 
   return (
@@ -1014,86 +1024,236 @@ function App() {
       </section>
 
       <section className="console-body">
-        <div className={activeTab === "interaction" ? "page-meta page-meta--interaction" : "page-meta"}>
-          <div>
-            <p>{ui.app.activeTab}</p>
-            <h1>{pageCopy.label}</h1>
-            <span>{pageCopy.detail}</span>
+        {activeTab !== "interaction" && (
+          <div className="page-meta">
+            <div>
+              <p>{ui.app.activeTab}</p>
+              <h1>{pageCopy.label}</h1>
+              <span>{pageCopy.detail}</span>
+            </div>
           </div>
-        </div>
+        )}
 
         {activeTab === "interaction" ? (
           <section className="workspace-grid workspace-grid--interaction" style={interactionLayoutStyle}>
-            <section className="interaction-stage">
-              <div className="stage-head">
-                <div>
-                  <p>{ui.layout.stage}</p>
-                  <h2>{ui.interaction.title}</h2>
-                  <span>{ui.interaction.routeHint}</span>
-                </div>
-              </div>
+            <Panel
+              title={ui.interaction.title}
+              icon={<MonitorCog size={18} />}
+              className="workspace-panel workspace-panel--interaction"
+            >
+              <p className="panel-lead panel-lead--tight">{ui.interaction.routeHint}</p>
 
               <div className="stage-toolbar">
-                <div className="route-presets" aria-label={ui.interaction.routePreset}>
-                  {screenRoutePresets.map((preset) => (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      className={snapshot.modules.interaction.screenRoutePreset === preset.value ? "selected" : ""}
-                      onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
-                    >
-                      {ui.screenRoutePresets[preset.value]}
-                    </button>
-                  ))}
+                <div className="stage-toolbar__top">
+                  <div className="route-presets" aria-label={ui.interaction.routePreset}>
+                    {screenRoutePresets.map((preset) => (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        className={snapshot.modules.interaction.screenRoutePreset === preset.value ? "selected" : ""}
+                        onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
+                      >
+                        {ui.screenRoutePresets[preset.value]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="screen-tools">
+                    {screenSelectionModes.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={screenSelectionMode === mode.id ? "selected" : ""}
+                        onClick={() => {
+                          setScreenSelectionMode(mode.id);
+                          setDragBox(null);
+                          if (mode.id === "solid") clearSequence();
+                        }}
+                      >
+                        {ui.screenSelectionModes[mode.id]}
+                      </button>
+                    ))}
+                    {sequenceGroups.length > 0 && (
+                      <button type="button" onClick={clearSequence}>{ui.actions.clearSequence}</button>
+                    )}
+                  </div>
+
+                  <div className="presentation-controls" aria-label={ui.interaction.presentation}>
+                    <span className="presentation-controls__label">{ui.layout.quickActions}</span>
+                    <div className="presentation-controls__buttons">
+                      <button
+                        type="button"
+                        className={screenPresentation.autoRedirect ? "selected" : ""}
+                        onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
+                      >
+                        {ui.interaction.autoRedirect}
+                      </button>
+                      <button
+                        type="button"
+                        className={screenPresentation.showMenu ? "selected" : ""}
+                        onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
+                      >
+                        {ui.interaction.showMenu}
+                      </button>
+                      <button
+                        type="button"
+                        className={screenPresentation.showDebug ? "selected" : ""}
+                        onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
+                      >
+                        {ui.interaction.showDebug}
+                      </button>
+                      <button type="button" onClick={saveSnapshot}>
+                        <Save size={15} /> {ui.actions.save}
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="screen-tools">
-                  {screenSelectionModes.map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={screenSelectionMode === mode.id ? "selected" : ""}
-                      onClick={() => {
-                        setScreenSelectionMode(mode.id);
-                        setDragBox(null);
-                        if (mode.id === "solid") clearSequence();
-                      }}
-                    >
-                      {ui.screenSelectionModes[mode.id]}
-                    </button>
-                  ))}
-                  {sequenceGroups.length > 0 && (
-                    <button type="button" onClick={clearSequence}>{ui.actions.clearSequence}</button>
-                  )}
-                </div>
+                <div className="stage-toolbar__bottom">
+                  <div className="stage-summary-row">
+                    <div className="interaction-readout">
+                      <span>{ui.interaction.intensity} {Math.round(snapshot.modules.interaction.intensity * 100)}%</span>
+                      <span>{ui.interaction.growth} {Math.round(snapshot.modules.interaction.treeGrowth * 100)}%</span>
+                      <span>{snapshot.modules.interaction.gestureActive ? ui.interaction.gesture : ui.status.offline}</span>
+                      <span>{ui.interaction.route} {ui.screenRoutePresets[snapshot.modules.interaction.screenRoutePreset]}</span>
+                    </div>
 
-                <div className="presentation-controls" aria-label={ui.interaction.presentation}>
-                  <span className="presentation-controls__label">{ui.layout.quickActions}</span>
-                  <div className="presentation-controls__buttons">
-                    <button
-                      type="button"
-                      className={screenPresentation.autoRedirect ? "selected" : ""}
-                      onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
-                    >
-                      {ui.interaction.autoRedirect}
-                    </button>
-                    <button
-                      type="button"
-                      className={screenPresentation.showMenu ? "selected" : ""}
-                      onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
-                    >
-                      {ui.interaction.showMenu}
-                    </button>
-                    <button
-                      type="button"
-                      className={screenPresentation.showDebug ? "selected" : ""}
-                      onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
-                    >
-                      {ui.interaction.showDebug}
-                    </button>
-                    <button type="button" onClick={saveSnapshot}>
-                      <Save size={15} /> {ui.actions.save}
-                    </button>
+                    {sequenceGroups.length > 0 && (
+                      <div className="sequence-step-control">
+                        <span>{ui.interaction.step}</span>
+                        {sequenceSteps.map((step) => (
+                          <button
+                            key={step}
+                            type="button"
+                            className={sequenceStep === step ? "selected" : ""}
+                            onClick={() => setSequenceStep(step)}
+                          >
+                            {step}
+                          </button>
+                        ))}
+                        <small>{Math.round(stepDurationMs(sequenceStep, snapshot.show.bpm))}ms @ {snapshot.show.bpm} BPM</small>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="stage-mode-grid">
+                    <div className="stage-control-group">
+                      <div className="stage-control-head">
+                        <div>
+                          <p>Mode / 模式</p>
+                          <strong>{snapshot.modules.interaction.visualMode === "firework" ? "Fireworks / 烟花" : "Tree / 树"}</strong>
+                        </div>
+                        <div className="segmented-control" aria-label="Interaction mode">
+                          <button
+                            type="button"
+                            className={snapshot.modules.interaction.visualMode === "tree" ? "selected" : ""}
+                            onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
+                          >
+                            Tree
+                          </button>
+                          <button
+                            type="button"
+                            className={snapshot.modules.interaction.visualMode === "firework" ? "selected" : ""}
+                            onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
+                          >
+                            Fireworks
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {snapshot.modules.interaction.visualMode === "tree" ? (
+                      <div className="stage-control-group">
+                        <div className="stage-control-head">
+                          <div>
+                            <p>Tree / 树控制</p>
+                            <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong>
+                          </div>
+                          <span className="stage-control-status">
+                            {ui.interactionModes[snapshot.modules.interaction.mode]}
+                          </span>
+                        </div>
+                        <div className="stage-actions">
+                          <button
+                            type="button"
+                            className={snapshot.modules.interaction.mode === "idle" ? "selected" : ""}
+                            onClick={() => triggerInteractionMode("idle")}
+                          >
+                            {ui.interactionModes.idle}
+                          </button>
+                          <button
+                            type="button"
+                            className={snapshot.modules.interaction.mode === "flow" ? "selected" : ""}
+                            onClick={() => triggerInteractionMode("flow")}
+                          >
+                            {ui.interactionModes.flow}
+                          </button>
+                          <button
+                            type="button"
+                            className={snapshot.modules.interaction.mode === "interaction" ? "selected" : ""}
+                            onClick={() => triggerInteractionMode("interaction")}
+                          >
+                            {ui.interactionModes.interaction}
+                          </button>
+                          <button
+                            type="button"
+                            className={snapshot.modules.interaction.mode === "climax" ? "selected" : ""}
+                            onClick={() => triggerInteractionMode("climax")}
+                          >
+                            {ui.interactionModes.climax}
+                          </button>
+                        </div>
+                        <div className="stage-actions stage-actions--utility">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              clearSequence();
+                              resetTreeGrowth();
+                            }}
+                          >
+                            Reset tree / 重置树
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="stage-control-group">
+                        <div className="stage-control-head">
+                          <div>
+                            <p>Fireworks / 烟花控制</p>
+                            <strong>{ui.fireworkStates.status}</strong>
+                          </div>
+                          <span className={`stage-control-status stage-control-status--${fireworkState}`}>
+                            {fireworkStateLabel}
+                          </span>
+                        </div>
+                        <div className="stage-actions">
+                          <button
+                            type="button"
+                            className={fireworkState === "standby" ? "selected" : ""}
+                            onClick={standbyFireworks}
+                          >
+                            Standby / 待机
+                          </button>
+                          <button
+                            type="button"
+                            className={fireworkState === "launching" ? "selected" : ""}
+                            onClick={launchFireworks}
+                          >
+                            Launch / 燃放
+                          </button>
+                          <button
+                            type="button"
+                            className={fireworkState === "resetting" ? "selected" : ""}
+                            onClick={resetFireworks}
+                          >
+                            Reset / 重置
+                          </button>
+                          <span className="stage-control-chip">
+                            Status: {fireworkStateLabel}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1135,187 +1295,59 @@ function App() {
                   })}
                   {dragBox && <span className="selection-box" style={dragBoxStyle(dragBox)} />}
                 </div>
-
-                <div className="interaction-readout">
-                  <span>{ui.interaction.intensity} {Math.round(snapshot.modules.interaction.intensity * 100)}%</span>
-                  <span>{ui.interaction.growth} {Math.round(snapshot.modules.interaction.treeGrowth * 100)}%</span>
-                  <span>{snapshot.modules.interaction.gestureActive ? ui.interaction.gesture : ui.status.offline}</span>
-                  <span>{ui.interaction.route} {ui.screenRoutePresets[snapshot.modules.interaction.screenRoutePreset]}</span>
-                </div>
-
-                {sequenceGroups.length > 0 && (
-                  <div className="sequence-step-control">
-                    <span>{ui.interaction.step}</span>
-                    {sequenceSteps.map((step) => (
-                      <button
-                        key={step}
-                        type="button"
-                        className={sequenceStep === step ? "selected" : ""}
-                        onClick={() => setSequenceStep(step)}
-                      >
-                        {step}
-                      </button>
-                    ))}
-                    <small>{Math.round(stepDurationMs(sequenceStep, snapshot.show.bpm))}ms @ {snapshot.show.bpm} BPM</small>
-                  </div>
-                )}
-
-                <div className="stage-control-group">
-                  <div className="stage-control-head">
-                    <div>
-                      <p>Mode / 模式</p>
-                      <strong>{snapshot.modules.interaction.visualMode === "firework" ? "Fireworks / 烟花" : "Tree / 树"}</strong>
-                    </div>
-                    <div className="segmented-control" aria-label="Interaction mode">
-                      <button
-                        type="button"
-                        className={snapshot.modules.interaction.visualMode === "tree" ? "selected" : ""}
-                        onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
-                      >
-                        Tree
-                      </button>
-                      <button
-                        type="button"
-                        className={snapshot.modules.interaction.visualMode === "firework" ? "selected" : ""}
-                        onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
-                      >
-                        Fireworks
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {snapshot.modules.interaction.visualMode === "tree" ? (
-                  <div className="stage-control-group">
-                    <div className="stage-control-head">
-                      <div>
-                        <p>Tree / 树控制</p>
-                        <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong>
-                      </div>
-                      <span className="stage-control-status">
-                        {ui.interactionModes[snapshot.modules.interaction.mode]}
-                      </span>
-                    </div>
-                    <div className="stage-actions">
-                      <button
-                        type="button"
-                        className={snapshot.modules.interaction.mode === "idle" ? "selected" : ""}
-                        onClick={() => triggerInteractionMode("idle")}
-                      >
-                        {ui.interactionModes.idle}
-                      </button>
-                      <button
-                        type="button"
-                        className={snapshot.modules.interaction.mode === "flow" ? "selected" : ""}
-                        onClick={() => triggerInteractionMode("flow")}
-                      >
-                        {ui.interactionModes.flow}
-                      </button>
-                      <button
-                        type="button"
-                        className={snapshot.modules.interaction.mode === "interaction" ? "selected" : ""}
-                        onClick={() => triggerInteractionMode("interaction")}
-                      >
-                        {ui.interactionModes.interaction}
-                      </button>
-                      <button
-                        type="button"
-                        className={snapshot.modules.interaction.mode === "climax" ? "selected" : ""}
-                        onClick={() => triggerInteractionMode("climax")}
-                      >
-                        {ui.interactionModes.climax}
-                      </button>
-                    </div>
-                    <div className="stage-actions stage-actions--utility">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          clearSequence();
-                          resetTreeGrowth();
-                        }}
-                      >
-                        Reset tree / 重置树
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="stage-control-group">
-                    <div className="stage-control-head">
-                      <div>
-                        <p>Fireworks / 烟花控制</p>
-                        <strong>{ui.fireworkStates.status}</strong>
-                      </div>
-                      <span className={`stage-control-status stage-control-status--${fireworkState}`}>
-                        {fireworkStateLabel}
-                      </span>
-                    </div>
-                    <div className="stage-actions">
-                      <button
-                        type="button"
-                        className={fireworkState === "standby" ? "selected" : ""}
-                        onClick={standbyFireworks}
-                      >
-                        Standby / 待机
-                      </button>
-                      <button
-                        type="button"
-                        className={fireworkState === "launching" ? "selected" : ""}
-                        onClick={launchFireworks}
-                      >
-                        Launch / 燃放
-                      </button>
-                      <button
-                        type="button"
-                        className={fireworkState === "resetting" ? "selected" : ""}
-                        onClick={resetFireworks}
-                      >
-                        Reset / 重置
-                      </button>
-                      <span className="stage-control-chip">
-                        Status: {fireworkStateLabel}
-                      </span>
-                    </div>
-                  </div>
-                )}
               </div>
-            </section>
+            </Panel>
 
             <aside className="interaction-rail interaction-rail--right">
               <div className="rail-shell">
                 <div className="rail-header">
                   <div>
-                    <p>{ui.layout.routes}</p>
-                    <strong>{ui.interaction.routeRegister}</strong>
+                    <p>{locale === "zh" ? "右侧概览" : "Side overview"}</p>
+                    <strong>{locale === "zh" ? "路由 · 日志" : "Routes · Logs"}</strong>
                   </div>
-                  <span className="rail-header__meta">{routeScreenIds.length}</span>
+                  <span className="rail-header__meta">{routeCount}</span>
                 </div>
 
                 <div className="rail-stack rail-stack--right">
+                  <div className="inspector-stats">
+                    <div>
+                      <span>{ui.layout.routes}</span>
+                      <strong>{routeCount}</strong>
+                    </div>
+                    <div>
+                      <span>{ui.interaction.clients}</span>
+                      <strong>{clientCount}</strong>
+                    </div>
+                    <div>
+                      <span>{ui.interaction.eventLog}</span>
+                      <strong>{eventCount}</strong>
+                    </div>
+                  </div>
+
                   <section className="route-board">
                     <div className="route-board__head">
                       <div>
                         <p>{ui.interaction.routeRegister}</p>
-                        <strong>{ui.interaction.routeHint}</strong>
+                        <strong>{locale === "zh" ? "快速编排" : "Quick route edit"}</strong>
                       </div>
-                      <span>{routeScreenIds.length}</span>
+                      <span>{routeCount}</span>
                     </div>
 
                     <div className="route-table route-table--rail">
                       {routeScreenIds.map((screenId) => {
                         const route = screenRoutes[screenId];
                         const routeClients = routeClientsByScreenId.get(screenId) || [];
+                        const clientSummary = summarizeClientIds(
+                          routeClients,
+                          locale === "zh" ? "暂无在线设备" : "No live device"
+                        );
                         return (
                           <article key={screenId}>
                             <div>
                               <strong>{screenId}</strong>
                               <span>{route?.url || "Route URL unavailable"}</span>
-                              <small>{route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"}</small>
-                              <small className="route-client-line">
-                                {ui.interaction.clients}: {routeClients.length > 0
-                                  ? routeClients.map((client) => client.id).join(" · ")
-                                  : locale === "zh"
-                                    ? "暂无在线设备"
-                                    : "No live device"}
+                              <small className="route-meta-line">
+                                {route?.updatedAt ? `updated ${new Date(route.updatedAt).toLocaleTimeString()}` : "waiting for route"} · {ui.interaction.clients}: {clientSummary}
                               </small>
                             </div>
                             <div className="owner-switch" aria-label={`${screenId} owner`}>
@@ -1338,7 +1370,7 @@ function App() {
                         <article className="route-table__unassigned">
                           <div>
                             <strong>{locale === "zh" ? "未绑定设备" : "Unassigned devices"}</strong>
-                            <span>{unassignedClients.map((client) => client.id).join(" · ")}</span>
+                            <span>{summarizeClientIds(unassignedClients, locale === "zh" ? "暂无在线设备" : "No live device")}</span>
                             <small>{ui.interaction.clients}</small>
                           </div>
                         </article>
@@ -1346,9 +1378,28 @@ function App() {
                     </div>
                   </section>
 
-                  <Panel title={ui.interaction.eventLog} icon={<ListChecks size={18} />} compact>
-                    <div className="event-list event-list--compact">
-                      {snapshot.eventLog.slice(0, 8).map((event) => (
+                  <section className="rail-log" aria-label={ui.interaction.eventLog}>
+                    <div className="rail-log__head">
+                      <div>
+                        <p>{ui.interaction.eventLog}</p>
+                        <strong>{locale === "zh" ? "最近记录" : "Recent events"}</strong>
+                      </div>
+                      <div className="rail-log__head-actions">
+                        {snapshot.eventLog.length > 6 && (
+                          <button
+                            type="button"
+                            className="rail-log__toggle"
+                            onClick={() => setEventLogExpanded((current) => !current)}
+                          >
+                            {eventLogExpanded ? (locale === "zh" ? "收起" : "Less") : (locale === "zh" ? "更多" : "More")}
+                          </button>
+                        )}
+                        <span>{eventCount}</span>
+                      </div>
+                    </div>
+
+                    <div className="event-list event-list--compact rail-log__body">
+                      {visibleEventLog.map((event) => (
                         <article key={event.id}>
                           <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
                           <strong>{event.type}</strong>
@@ -1356,7 +1407,7 @@ function App() {
                         </article>
                       ))}
                     </div>
-                  </Panel>
+                  </section>
                 </div>
               </div>
             </aside>
@@ -1722,16 +1773,18 @@ function Panel({
   title,
   icon,
   compact,
+  className,
   children
 }: {
   id?: string;
   title: string;
   icon: React.ReactNode;
   compact?: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} className={compact ? "panel compact" : "panel"}>
+    <section id={id} className={compact ? `panel compact ${className || ""}`.trim() : `panel ${className || ""}`.trim()}>
       <div className="panel-heading">
         <h2>{icon}{title}</h2>
       </div>
