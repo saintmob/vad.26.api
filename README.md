@@ -81,19 +81,31 @@ R1 R2
 Visual Control 控制 4302 VJ：
 
 - `setScene`
-- `setPreset`
 - `setText`
-- `setFx`
+- `setAudioDrive`
 - `setFullscreen`
 
 这些命令通过 `/api/control` 进入 4300，再经 WebSocket 广播给 VJ。屏幕已经路由到 VJ 时，VJ 的 `/screen/<screenId>` 页面也会接收这些命令。
+
+4300 API 仍兼容转发 `setPreset`、`setColors`、`setFx`，但 Dashboard 只保留现场总控需要的高层控制，细节微调在 4302 VJ 控制台完成。
+
+4300 Dashboard 的 VJ 场景选择器与 4302 当前场景集合保持一致：
+
+- `Dumbar`
+- `Topology`
+- `Liquid`
+- `Chromaflux`
+- `Blue Font`
+- `Cyber`
+- `Pulse`
+- `Void`
 
 ### Multi-screen Interaction
 
 Multi-screen Interaction 控制 4303 baofa 与屏幕路由：
 
 - `Balanced`：A1、L1、L2、R1、R2 给 VJ，其余给 baofa。
-- `VJ Takeover`：A1、B1-B6、L1、L2、R1、R2 给 VJ，其余给 baofa。
+- `VJ Takeover`：全部给 VJ。
 - `Baofa Takeover`：全部给 baofa。
 
 每个屏幕可单独设置 owner：

@@ -50,7 +50,7 @@ const screenIds = [
   "L1", "L2", "R1", "R2"
 ];
 const balancedVjScreens = new Set(["A1"]);
-const takeoverVjScreens = new Set(["A1", "B1", "B2", "B3", "B4", "B5", "B6"]);
+const takeoverVjScreens = new Set(showScreenIds);
 
 export function createFirebaseDashboardClient(options: DashboardClientOptions) {
   if (!isFirebaseRealtimeConfigured) {

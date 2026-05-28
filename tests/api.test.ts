@@ -8,7 +8,7 @@ import WebSocket from "ws";
 import { createServer, type CreateServerOptions } from "../src/server.js";
 
 async function withServer(fn: (baseUrl: string, server: http.Server) => Promise<void>, options: CreateServerOptions = {}) {
-  const server = createServer({ persist: false, ...options });
+  const server = createServer({ persist: false, loadSnapshot: false, ...options });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert(address && typeof address === "object");
@@ -70,7 +70,8 @@ test("updates screen route preset and individual screen owners", async () => {
     assert.equal(presetResponse.status, 202);
     assert.equal(presetBody.state.modules.interaction.screenRoutePreset, "vj_takeover");
     assert.equal(presetBody.state.modules.interaction.screenRoutes.B6.owner, "vj");
-    assert.equal(presetBody.state.modules.interaction.screenRoutes.C1.owner, "baofa");
+    assert.equal(presetBody.state.modules.interaction.screenRoutes.C1.owner, "vj");
+    assert.equal(presetBody.state.modules.interaction.screenRoutes.R2.owner, "vj");
 
     const ownerResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",

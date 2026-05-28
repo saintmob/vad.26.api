@@ -115,13 +115,21 @@ export interface VisualModuleState {
     rgbSplitAmount: number;
     distortion: number;
     glitchActive: boolean;
+    speed: number;
+    chaos: number;
   };
   text: {
     value: string;
     animation: string;
     reactive: number;
+    glow: number;
+    speed: number;
+    color: string;
+    fontSize: number;
+    fontWeight: number;
+    letterSpacing: number;
   };
-  audioDriveMode: "mic" | "music" | "hybrid";
+  audioDriveMode: "mic" | "music" | "api";
   fullscreen: boolean;
   visualMemories: Array<{ id: string; name: string; scene: string }>;
 }

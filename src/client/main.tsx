@@ -13,7 +13,6 @@ import {
   Send,
   Settings2,
   SlidersHorizontal,
-  Sparkles,
   Square,
   X,
   Type,
@@ -121,7 +120,7 @@ type UiCopy = {
     colors: string;
     fullscreen: string;
     text: string;
-    memories: string;
+    textStyle: string;
   };
   audio: {
     title: string;
@@ -174,7 +173,9 @@ const tabDefinitions: Array<{
 ];
 
 const interactionModes = ["idle", "interaction", "flow", "climax"];
-const visualScenes = ["Cyber", "Liquid", "Topology", "Pulse", "Void", "Dumbar"];
+const visualScenes = ["Dumbar", "Topology", "Liquid", "Chromaflux", "Blue Font", "Cyber", "Pulse", "Void"];
+const visualTextStyles = ["Cinematic", "Massive", "Glitch", "Hologram", "Floating", "Beat"];
+const visualAudioDrives: Array<PerformanceState["modules"]["visual"]["audioDriveMode"]> = ["mic", "music", "api"];
 const audioPresets = ["Neon Loop", "Warehouse", "Dream Pop", "Break Lab", "EDM Festival", "Echo Bass"];
 const screenSelectionModes: Array<{ id: ScreenSelectionMode; label: string }> = [
   { id: "solid", label: "实线点选" },
@@ -302,7 +303,7 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       colors: "颜色",
       fullscreen: "全屏",
       text: "文字",
-      memories: "视觉记忆"
+      textStyle: "文字动效"
     },
     audio: {
       title: "DJ",
@@ -451,7 +452,7 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       colors: "Colors",
       fullscreen: "Fullscreen",
       text: "Text",
-      memories: "Visual memories"
+      textStyle: "Text style"
     },
     audio: {
       title: "DJ",
@@ -1366,7 +1367,7 @@ function App() {
             </aside>
           </section>
         ) : activeTab === "visual" ? (
-          <section className="workspace-grid workspace-grid--module">
+          <section className="workspace-grid workspace-grid--module workspace-grid--visual">
             <Panel title={ui.visual.title} icon={<Aperture size={18} />}>
               <p className="panel-lead">{ui.visual.lead}</p>
 
@@ -1378,10 +1379,6 @@ function App() {
                 <div>
                   <span>{ui.visual.preset}</span>
                   <strong>{snapshot.modules.visual.preset}</strong>
-                </div>
-                <div>
-                  <span>{ui.visual.drive}</span>
-                  <strong>{snapshot.modules.visual.audioDriveMode}</strong>
                 </div>
               </div>
 
@@ -1402,6 +1399,22 @@ function App() {
                     {scene}
                   </button>
                 ))}
+              </div>
+
+              <div className="visual-drive-control">
+                <span>{ui.visual.drive}</span>
+                <div className="button-row button-row--tight">
+                  {visualAudioDrives.map((drive) => (
+                    <button
+                      key={drive}
+                      type="button"
+                      className={snapshot.modules.visual.audioDriveMode === drive ? "selected" : ""}
+                      onClick={() => sendControl("visual", "setAudioDrive", "visual-audio-drive", drive)}
+                    >
+                      {drive === "api" ? "show api" : drive}
+                    </button>
+                  ))}
+                </div>
                 <button
                   type="button"
                   className={snapshot.modules.visual.fullscreen ? "selected" : ""}
@@ -1413,30 +1426,27 @@ function App() {
 
               <form className="inline-form" onSubmit={(event) => {
                 event.preventDefault();
-                void sendControl("visual", "setText", "visual-text", manualText);
+                void sendControl("visual", "setText", "visual-text", {
+                  value: manualText,
+                  animation: snapshot.modules.visual.text.animation,
+                  reactive: snapshot.modules.visual.text.reactive
+                });
               }}>
                 <Type size={16} />
+                <select
+                  value={snapshot.modules.visual.text.animation}
+                  onChange={(event) => sendControl("visual", "setText", "visual-text-style", {
+                    value: snapshot.modules.visual.text.value,
+                    animation: event.target.value,
+                    reactive: snapshot.modules.visual.text.reactive
+                  })}
+                >
+                  {visualTextStyles.map((style) => <option key={style} value={style}>{style}</option>)}
+                </select>
                 <input value={manualText} onChange={(event) => setManualText(event.target.value)} />
                 <button type="submit"><Send size={15} /> {ui.actions.send}</button>
               </form>
             </Panel>
-
-            <div className="support-stack">
-              <Panel title={ui.visual.memories} icon={<Sparkles size={18} />} compact>
-                <div className="client-list">
-                  {snapshot.modules.visual.visualMemories.length === 0 && (
-                    <p className="empty">{locale === "zh" ? "暂无视觉记忆。" : "No visual memories yet."}</p>
-                  )}
-                  {snapshot.modules.visual.visualMemories.map((memory) => (
-                    <article key={memory.id}>
-                      <strong>{memory.name}</strong>
-                      <span>{memory.scene}</span>
-                      <small>{memory.id}</small>
-                    </article>
-                  ))}
-                </div>
-              </Panel>
-            </div>
           </section>
         ) : (
           <section className="workspace-grid workspace-grid--module">

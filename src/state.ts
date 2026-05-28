@@ -36,7 +36,7 @@ const SCREEN_TOPOLOGY = [
 ];
 
 const VJ_SCREEN_IDS = new Set(["A1"]);
-const VJ_TAKEOVER_SCREEN_IDS = new Set(["A1", "B1", "B2", "B3", "B4", "B5", "B6"]);
+const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
 const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
   const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
   return origin ? `${origin.protocol}//${origin.host}` : null;
@@ -116,12 +116,20 @@ export function createDefaultState(now = Date.now()): PerformanceState {
           bloomIntensity: 1.5,
           rgbSplitAmount: 0.005,
           distortion: 0,
-          glitchActive: false
+          glitchActive: false,
+          speed: 1,
+          chaos: 0
         },
         text: {
-          value: "NEONPULSE",
+          value: "GAFA",
           animation: "Cinematic",
-          reactive: 1
+          reactive: 1,
+          glow: 1,
+          speed: 1,
+          color: "#ffffff",
+          fontSize: 4.6,
+          fontWeight: 900,
+          letterSpacing: 0.02
         },
         audioDriveMode: "mic",
         fullscreen: false,
@@ -490,9 +498,12 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     }
     if (command.command === "setScene") state.modules.visual.scene = String(value || command.target);
     if (command.command === "setPreset") state.modules.visual.preset = String(value || command.target);
-    if (command.command === "setText") state.modules.visual.text.value = String(value || "");
-    if (command.command === "setAudioDrive" && ["mic", "music", "hybrid"].includes(String(value))) {
-      state.modules.visual.audioDriveMode = String(value) as "mic" | "music" | "hybrid";
+    if (command.command === "setText") {
+      if (isRecord(value)) mergePatch(state.modules.visual.text as unknown as JsonRecord, value);
+      else state.modules.visual.text.value = String(value || "");
+    }
+    if (command.command === "setAudioDrive" && ["mic", "music", "api", "hybrid"].includes(String(value))) {
+      state.modules.visual.audioDriveMode = (String(value) === "hybrid" ? "api" : String(value)) as "mic" | "music" | "api";
     }
     if (command.command === "setFullscreen") state.modules.visual.fullscreen = Boolean(value);
     if (command.command === "setColors" && isRecord(value)) mergePatch(state.modules.visual.colors as unknown as JsonRecord, value);
@@ -587,6 +598,7 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
     state.operationLock.lockedModules || (state.operationLock.locked ? MODULE_NAMES : [])
   );
   state.operationLock.locked = state.operationLock.lockedModules.length > 0;
+  state.modules.visual.audioDriveMode = normalizeVisualAudioDriveMode(state.modules.visual.audioDriveMode);
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
   state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
@@ -615,6 +627,11 @@ function isCentralControlSource(source: unknown): boolean {
 function normalizeLockModule(value: unknown): ModuleName | null {
   if (value === "video") return "visual";
   return isModuleName(value) ? value : null;
+}
+
+function normalizeVisualAudioDriveMode(value: unknown): "mic" | "music" | "api" {
+  if (value === "hybrid") return "api";
+  return value === "mic" || value === "music" || value === "api" ? value : "mic";
 }
 
 function normalizeLockedModules(value: unknown): ModuleName[] {
