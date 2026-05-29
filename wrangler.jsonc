@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vad-26-show-control",
+  "main": "src/cloudflare/worker.ts",
+  "compatibility_date": "2026-05-29",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SHOW_ROOM",
+        "class_name": "ShowRoomDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ShowRoomDurableObject"]
+    }
+  ],
+  "vars": {
+    "DEFAULT_SHOW_ID": "show-main",
+    "PRIMARY_DJ_CLIENT_ID": "dj-main",
+    "VJ_SCREEN_ORIGIN": "https://vj.example.com",
+    "BAOFA_SCREEN_ORIGIN": "https://baofa.example.com"
+  }
+}
