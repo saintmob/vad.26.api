@@ -354,6 +354,7 @@ function openStream(path: string, onRemoteChange: () => void | Promise<void>) {
 
 async function firebaseGet<T>(path: string): Promise<T | null> {
   const response = await fetch(jsonUrl(path));
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Firebase GET ${path} failed: ${response.status}`);
   return response.json() as Promise<T | null>;
 }

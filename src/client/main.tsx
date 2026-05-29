@@ -136,9 +136,10 @@ type UiCopy = {
   screenRoutePresets: Record<ScreenRoutePreset, string>;
   screenOwners: Record<ScreenOwner | "unset", string>;
   interactionModes: Record<string, string>;
+  fireworkStates: Record<"standby" | "launching" | "resetting" | "status", string>;
 };
 
-const env = import.meta.env;
+const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env || {};
 const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
 const storageKeys = {
   token: "vad-control-token",
@@ -645,6 +646,7 @@ function App() {
     let socket: WebSocket | null = null;
     let reconnectTimer: number | null = null;
     let firebaseClient: ReturnType<typeof createFirebaseDashboardClient> | null = null;
+    let firebaseFallbackStarted = false;
 
     async function boot() {
       try {
@@ -664,7 +666,13 @@ function App() {
               if (!closed) setLastAck(message);
             },
             onError: (message) => {
-              if (!closed) setLastAck(message);
+              if (closed) return;
+              setLastAck(`${message}; falling back to Vercel WebSocket`);
+              if (!firebaseFallbackStarted) {
+                firebaseFallbackStarted = true;
+                void firebaseClient?.close();
+                connect();
+              }
             }
           });
           firebaseClientRef.current = firebaseClient;
@@ -1088,7 +1096,7 @@ function App() {
                                 {ui.interactionModes[mode]}
                               </button>
                             ))}
-                            <button type="button" className="reset-btn" onClick={() => { clearSequence(); resetTreeGrowth(); }}>
+                            <button type="button" className="reset-btn" onClick={() => { clearSequence(); void sendControl("interaction", "setMode", "interaction-mode", "idle"); }}>
                               Reset
                             </button>
                           </div>
@@ -1227,21 +1235,21 @@ function App() {
                     </div>
                   </div>
                   <div className="interaction-readout-row" aria-label={locale === "zh" ? "状态概览" : "Status overview"}>
-                    {["intensity", "treeGrowth", "gestureActive", "screenRoutePreset"].map((key, idx) => {
-                      const val = snapshot.modules.interaction[key];
-                      const label = idx === 0 ? ui.interaction.intensity :
-                                    idx === 1 ? ui.interaction.growth :
-                                    idx === 2 ? ui.interaction.gesture : ui.interaction.route;
-
+                    {[
+                      { key: "intensity", label: ui.interaction.intensity, value: snapshot.modules.interaction.intensity, kind: "percent" },
+                      { key: "treeGrowth", label: ui.interaction.growth, value: snapshot.modules.interaction.treeGrowth, kind: "percent" },
+                      { key: "gestureActive", label: ui.interaction.gesture, value: snapshot.modules.interaction.gestureActive, kind: "boolean" },
+                      { key: "screenRoutePreset", label: ui.interaction.route, value: snapshot.modules.interaction.screenRoutePreset, kind: "route" }
+                    ].map((item, idx) => {
                       let displayVal = "";
-                      if (idx === 0 || idx === 1) displayVal = `${Math.round(val * 100)}%`;
-                      else if (idx === 2) displayVal = val ? "ACTIVE" : "IDLE";
-                      else displayVal = ui.screenRoutePresets[val as ScreenRoutePreset];
+                      if (item.kind === "percent" && typeof item.value === "number") displayVal = `${Math.round(item.value * 100)}%`;
+                      else if (item.kind === "boolean") displayVal = item.value ? "ACTIVE" : "IDLE";
+                      else if (item.kind === "route") displayVal = ui.screenRoutePresets[item.value as ScreenRoutePreset];
 
                       return (
-                        <div key={key} className="header-stat-pill">
-                          <span className="stat-label">{label}</span>
-                          <span className={`stat-value ${idx === 2 && val ? "active" : ""}`}>{displayVal}</span>
+                        <div key={item.key} className="header-stat-pill">
+                          <span className="stat-label">{item.label}</span>
+                          <span className={`stat-value ${idx === 2 && item.value ? "active" : ""}`}>{displayVal}</span>
                         </div>
                       );
                     })}
