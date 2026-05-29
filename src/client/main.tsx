@@ -34,6 +34,7 @@ type DashboardTab = "interaction" | "visual" | "audio";
 type ThemeMode = "system" | "light" | "dark";
 type LanguageMode = "system" | "zh" | "en";
 type UiLanguage = "zh" | "en";
+type SyncStatus = "idle" | "sending" | "synced" | "error";
 
 type UiCopy = {
   app: {
@@ -141,6 +142,8 @@ type UiCopy = {
 
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env || {};
 const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
+const CLIENT_ONLINE_STALE_MS = 120_000;
+const MIN_PENDING_ACTION_MS = 180;
 const storageKeys = {
   token: "vad-control-token",
   tab: "vad-dashboard-tab",
@@ -537,6 +540,17 @@ function normalizeScreenOccupancyId(value: string | null | undefined) {
   return value === "MASTER" ? "A1" : value;
 }
 
+function makeActionKey(module: ControlCommand["module"], command: string, target: string) {
+  return `${module}:${command}:${target}`;
+}
+
+function isLiveClient(client: PerformanceState["clients"][string], now: number) {
+  if (client.status !== "online") return false;
+  const lastSeen = Number(client.lastSeen || client.connectedAt || 0);
+  if (!lastSeen) return true;
+  return now - lastSeen <= CLIENT_ONLINE_STALE_MS;
+}
+
 function Root() {
   const screenId = getScreenIdFromPath();
   if (screenId) return <ScreenGateway screenId={screenId} />;
@@ -578,8 +592,17 @@ function App() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [prefersDark, setPrefersDark] = React.useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [systemLanguage, setSystemLanguage] = React.useState<UiLanguage>(() => resolveBrowserLanguage());
+  const [pendingActions, setPendingActions] = React.useState<Set<string>>(() => new Set());
+  const [syncStatus, setSyncStatus] = React.useState<SyncStatus>("idle");
+  const [lastSyncedAt, setLastSyncedAt] = React.useState<number | null>(null);
+  const [statusNow, setStatusNow] = React.useState(() => Date.now());
   const firebaseClientRef = React.useRef<ReturnType<typeof createFirebaseDashboardClient> | null>(null);
   const screenGridRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setStatusNow(Date.now()), 2000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   React.useEffect(() => {
     window.localStorage.setItem(storageKeys.token, token);
@@ -756,6 +779,10 @@ function App() {
     target: string,
     value?: unknown
   ) => {
+    const pendingKey = makeActionKey(module, command, target);
+    const startedAt = Date.now();
+    setPendingActions((current) => new Set(current).add(pendingKey));
+    setSyncStatus("sending");
     try {
       const payload: Omit<ControlCommand, "timestamp"> = {
         type: "control.command",
@@ -769,13 +796,26 @@ function App() {
       if (shouldUseFirebaseRealtime() && firebaseClientRef.current) {
         const commandResult = await firebaseClientRef.current.sendControl(payload);
         setLastAck(`${commandResult.command} sent for ${commandResult.target}`);
+        setLastSyncedAt(Date.now());
+        setSyncStatus("synced");
         return;
       }
       const result = await postJson<{ state: PerformanceState; command: ControlCommand }>("/api/control", payload);
       setSnapshot(result.state);
       setLastAck(`${result.command.command} accepted for ${result.command.target}`);
+      setLastSyncedAt(Date.now());
+      setSyncStatus("synced");
     } catch (error) {
       setLastAck(error instanceof Error ? error.message : String(error));
+      setSyncStatus("error");
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_PENDING_ACTION_MS) await wait(MIN_PENDING_ACTION_MS - elapsed);
+      setPendingActions((current) => {
+        const next = new Set(current);
+        next.delete(pendingKey);
+        return next;
+      });
     }
   }, [postJson]);
 
@@ -792,16 +832,22 @@ function App() {
   }, [sendControl]);
 
   const saveSnapshot = React.useCallback(async () => {
+    setSyncStatus("sending");
     try {
       if (shouldUseFirebaseRealtime() && firebaseClientRef.current) {
         await firebaseClientRef.current.saveSnapshot();
+        setLastSyncedAt(Date.now());
+        setSyncStatus("synced");
         return;
       }
       const result = await postJson<{ state: PerformanceState }>("/api/show/snapshot", {});
       setSnapshot(result.state);
       setLastAck("Snapshot saved");
+      setLastSyncedAt(Date.now());
+      setSyncStatus("synced");
     } catch (error) {
       setLastAck(error instanceof Error ? error.message : String(error));
+      setSyncStatus("error");
     }
   }, [postJson]);
 
@@ -835,7 +881,7 @@ function App() {
       const occupiedClientId = snapshot
         ? Object.values(snapshot.clients).find((client) =>
             client.module === "interaction" &&
-            client.status === "online" &&
+            isLiveClient(client, statusNow) &&
             normalizeScreenOccupancyId(client.screenId) === normalizeScreenOccupancyId(screenId)
           )?.id
         : null;
@@ -845,7 +891,7 @@ function App() {
     if (screenSelectionMode === "dashed") {
       addSequenceGroup([screenId]);
     }
-  }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl, snapshot]);
+  }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl, snapshot, statusNow]);
 
   const handleBoxPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (screenSelectionMode !== "box" || event.button !== 0) return;
@@ -908,16 +954,17 @@ function App() {
 
   const show = snapshot.show;
   const clients = Object.values(snapshot.clients);
+  const liveClients = clients.filter((client) => isLiveClient(client, statusNow));
   const routeClientsByScreenId = new Map<string, Array<PerformanceState["clients"][string]>>();
-  for (const client of clients) {
-    if (client.status !== "online" || !client.screenId) continue;
+  for (const client of liveClients) {
+    if (!client.screenId) continue;
     const screenId = normalizeScreenOccupancyId(client.screenId);
     if (!screenId) continue;
     const current = routeClientsByScreenId.get(screenId) || [];
     current.push(client);
     routeClientsByScreenId.set(screenId, current);
   }
-  const unassignedClients = clients.filter((client) => client.status === "online" && !client.screenId);
+  const unassignedClients = liveClients.filter((client) => !client.screenId);
   const audioSources = Object.values(snapshot.audioSources).sort((a, b) => b.level - a.level);
   const activeSource = snapshot.audioSources[snapshot.modules.audio.activeSourceId] || audioSources[0];
   const screenTopology = normalizeScreenTopology(snapshot.modules.interaction.screenTopology);
@@ -936,7 +983,7 @@ function App() {
         : ui.fireworkStates.standby;
   const routeScreenIds = screenTopology.flatMap((row) => row).filter(Boolean);
   const routeCount = routeScreenIds.length;
-  const clientCount = clients.length;
+  const clientCount = liveClients.length;
   const eventCount = snapshot.eventLog.length;
   const visibleEventLog = eventLogExpanded ? snapshot.eventLog : snapshot.eventLog.slice(0, 6);
   const summarizeClientIds = (items: Array<{ id: string }>, emptyLabel: string) => {
@@ -948,6 +995,26 @@ function App() {
   const pageCopy = ui.tabs[activeTab];
   const latestAck = lastAck || ui.status.waiting;
   const showStatusLabel = ui.show[show.status];
+  const effectiveSyncStatus: SyncStatus = pendingActions.size > 0 ? "sending" : syncStatus;
+  const syncLabel =
+    effectiveSyncStatus === "sending"
+      ? (locale === "zh" ? `同步中 ${pendingActions.size}` : `Syncing ${pendingActions.size}`)
+      : effectiveSyncStatus === "error"
+        ? (locale === "zh" ? "同步失败" : "Sync error")
+        : lastSyncedAt
+          ? (locale === "zh" ? `已同步 ${new Date(lastSyncedAt).toLocaleTimeString()}` : `Synced ${new Date(lastSyncedAt).toLocaleTimeString()}`)
+          : (locale === "zh" ? "待同步" : "Idle");
+  const actionButtonClass = (
+    module: ControlCommand["module"],
+    command: string,
+    target: string,
+    selected = false,
+    extra = ""
+  ) => [
+    extra,
+    selected ? "selected" : "",
+    pendingActions.has(makeActionKey(module, command, target)) ? "is-pending" : ""
+  ].filter(Boolean).join(" ");
   const interactionLayoutStyle = {
     "--right-rail-width": "clamp(330px, 23vw, 390px)"
   } as React.CSSProperties;
@@ -982,6 +1049,13 @@ function App() {
                 <div>
                   <strong>{ui.app.connection}</strong>
                   <span>{ui.status[connection]}</span>
+                </div>
+              </div>
+              <div className={`status-chip sync-chip sync-chip--${effectiveSyncStatus}`}>
+                <div className={`connection-dot ${effectiveSyncStatus === "error" ? "offline" : effectiveSyncStatus === "sending" ? "connecting" : "connected"}`} />
+                <div>
+                  <strong>{locale === "zh" ? "数据同步" : "Sync"}</strong>
+                  <span>{syncLabel}</span>
                 </div>
               </div>
               <div className="status-chip">
@@ -1034,16 +1108,16 @@ function App() {
             <span>{show.id} · {show.bpm} BPM · {formatMs(show.positionMs)}</span>
           </div>
           <div className="playback-bar__actions">
-            <button type="button" className={show.status === "running" ? "selected" : ""} onClick={() => sendControl("show", "play", show.id)}>
+            <button type="button" className={actionButtonClass("show", "play", show.id, show.status === "running")} onClick={() => sendControl("show", "play", show.id)}>
               <Play size={16} /> {ui.actions.play}
             </button>
-            <button type="button" className={show.status === "paused" ? "selected" : ""} onClick={() => sendControl("show", "pause", show.id)}>
+            <button type="button" className={actionButtonClass("show", "pause", show.id, show.status === "paused")} onClick={() => sendControl("show", "pause", show.id)}>
               <Pause size={16} /> {ui.actions.pause}
             </button>
-            <button type="button" className={show.status === "ended" ? "selected" : ""} onClick={() => sendControl("show", "stop", show.id)}>
+            <button type="button" className={actionButtonClass("show", "stop", show.id, show.status === "ended")} onClick={() => sendControl("show", "stop", show.id)}>
               <Square size={16} /> {ui.actions.stop}
             </button>
-            <button type="button" onClick={() => sendControl("show", "reset", show.id)}>
+            <button type="button" className={actionButtonClass("show", "reset", show.id)} onClick={() => sendControl("show", "reset", show.id)}>
               <RotateCcw size={16} /> {ui.actions.reset}
             </button>
           </div>
@@ -1076,14 +1150,14 @@ function App() {
                         <div className="segmented-control global-mode-switch">
                           <button
                             type="button"
-                            className={snapshot.modules.interaction.visualMode === "tree" ? "selected" : ""}
+                            className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "tree")}
                             onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
                           >
                             Tree
                           </button>
                           <button
                             type="button"
-                            className={snapshot.modules.interaction.visualMode === "firework" ? "selected" : ""}
+                            className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "firework")}
                             onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
                           >
                             Fireworks
@@ -1099,13 +1173,13 @@ function App() {
                               <button
                                 key={mode}
                                 type="button"
-                                className={snapshot.modules.interaction.mode === mode ? "selected" : ""}
+                                className={actionButtonClass("interaction", "setMode", sequenceGroups.length === 0 ? "interaction-mode" : "sequence", snapshot.modules.interaction.mode === mode)}
                                 onClick={() => triggerInteractionMode(mode)}
                               >
                                 {ui.interactionModes[mode]}
                               </button>
                             ))}
-                            <button type="button" className="reset-btn" onClick={() => { clearSequence(); void sendControl("interaction", "setMode", "interaction-mode", "idle"); }}>
+                            <button type="button" className={actionButtonClass("interaction", "setMode", "interaction-mode", false, "reset-btn")} onClick={() => { clearSequence(); void sendControl("interaction", "setMode", "interaction-mode", "idle"); }}>
                               Reset
                             </button>
                           </div>
@@ -1116,21 +1190,21 @@ function App() {
                           <div className="action-buttons">
                             <button
                               type="button"
-                              className={fireworkState === "standby" ? "selected" : ""}
+                              className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "standby")}
                               onClick={standbyFireworks}
                             >
                               Standby
                             </button>
                             <button
                               type="button"
-                              className={fireworkState === "launching" ? "selected" : ""}
+                              className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "launching")}
                               onClick={launchFireworks}
                             >
                               Launch
                             </button>
                             <button
                               type="button"
-                              className={fireworkState === "resetting" ? "selected" : ""}
+                              className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "resetting")}
                               onClick={resetFireworks}
                             >
                               Reset
@@ -1167,14 +1241,14 @@ function App() {
                       <div className="presentation-toggles">
                         <button
                           type="button"
-                          className={screenPresentation.showMenu ? "selected" : ""}
+                          className={actionButtonClass("interaction", "setScreenMenuVisible", "screen-menu", screenPresentation.showMenu)}
                           onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
                         >
                           <Eye size={14} /> {ui.interaction.showMenu}
                         </button>
                         <button
                           type="button"
-                          className={screenPresentation.showDebug ? "selected" : ""}
+                          className={actionButtonClass("interaction", "setScreenDebugVisible", "screen-debug", screenPresentation.showDebug)}
                           onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
                         >
                           <Bug size={14} /> {ui.interaction.showDebug}
@@ -1215,6 +1289,8 @@ function App() {
                       >
                         {screenLayoutItems.map((screen) => {
                           const route = screenRoutes[screen.id];
+                          const screenClients = routeClientsByScreenId.get(screen.id) || [];
+                          const isScreenOnline = screenClients.length > 0;
                           return (
                             <button
                               key={screen.id}
@@ -1224,14 +1300,18 @@ function App() {
                                 snapshot.modules.interaction.screenId === screen.id ? "selected" : "",
                                 sequenceOrderByScreen.has(screen.id) ? "sequenced" : "",
                                 screen.id === "A1" ? "master-screen" : "",
-                                route?.owner ? `owner-${route.owner}` : ""
+                                route?.owner ? `owner-${route.owner}` : "",
+                                isScreenOnline ? "is-online" : "is-offline",
+                                pendingActions.has(makeActionKey("interaction", "setScreen", screen.id)) ? "is-pending" : ""
                               ].filter(Boolean).join(" ")}
                               style={getScreenLayoutStyle(screen)}
                               onClick={() => handleScreenSelect(screen.id)}
                               title={route?.url || route?.owner || screen.id}
                             >
+                              <i className="device-dot" aria-label={isScreenOnline ? (locale === "zh" ? "设备在线" : "Device online") : (locale === "zh" ? "设备离线" : "Device offline")} />
                               <strong>{screen.id}</strong>
                               <span>{ui.screenOwners[route?.owner || "unset"]}</span>
+                              {isScreenOnline && <small>{screenClients.length}</small>}
                               {sequenceOrderByScreen.has(screen.id) && (
                                 <em className="screen-order">{sequenceOrderByScreen.get(screen.id)}</em>
                               )}
@@ -1294,7 +1374,7 @@ function App() {
                           <button
                             key={preset.value}
                             type="button"
-                            className={snapshot.modules.interaction.screenRoutePreset === preset.value ? "selected" : ""}
+                            className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.value)}
                             onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
                           >
                             {ui.screenRoutePresets[preset.value]}
@@ -1307,15 +1387,16 @@ function App() {
                       {routeScreenIds.map((screenId) => {
                         const route = screenRoutes[screenId];
                         const routeClients = routeClientsByScreenId.get(screenId) || [];
+                        const isRouteOnline = routeClients.length > 0;
                         const clientSummary = summarizeClientIds(
                           routeClients,
                           locale === "zh" ? "暂无在线设备" : "No live device"
                         );
                         const isSelected = snapshot.modules.interaction.screenId === screenId;
                         return (
-                          <article key={screenId} className={isSelected ? "selected" : ""}>
+                          <article key={screenId} className={[isSelected ? "selected" : "", isRouteOnline ? "is-online" : "is-offline"].filter(Boolean).join(" ")}>
                             <div>
-                              <strong>{screenId}</strong>
+                              <strong><i className="device-dot" />{screenId}</strong>
                               <span>{route?.url || "Route URL unavailable"}</span>
                               <small className="route-meta-line">
                                 {route?.updatedAt ? new Date(route.updatedAt).toLocaleTimeString() : (locale === "zh" ? "等待中" : "Waiting")} · {ui.interaction.clients}: {clientSummary}
@@ -1326,7 +1407,7 @@ function App() {
                                 <button
                                   key={owner.value}
                                   type="button"
-                                  className={route?.owner === owner.value ? `selected owner-${owner.value}` : ""}
+                                  className={actionButtonClass("interaction", "setScreenOwner", screenId, route?.owner === owner.value, route?.owner === owner.value ? `owner-${owner.value}` : "")}
                                   onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
                                 >
                                   {ui.screenOwners[owner.value]}
@@ -1414,7 +1495,7 @@ function App() {
                   <button
                     key={scene}
                     type="button"
-                    className={snapshot.modules.visual.scene === scene ? "selected" : ""}
+                    className={actionButtonClass("visual", "setScene", "visual-main", snapshot.modules.visual.scene === scene)}
                     onClick={() => sendControl("visual", "setScene", "visual-main", scene)}
                   >
                     {scene}
@@ -1429,7 +1510,7 @@ function App() {
                     <button
                       key={drive}
                       type="button"
-                      className={snapshot.modules.visual.audioDriveMode === drive ? "selected" : ""}
+                      className={actionButtonClass("visual", "setAudioDrive", "visual-audio-drive", snapshot.modules.visual.audioDriveMode === drive)}
                       onClick={() => sendControl("visual", "setAudioDrive", "visual-audio-drive", drive)}
                     >
                       {drive === "api" ? "show api" : drive}
@@ -1438,7 +1519,7 @@ function App() {
                 </div>
                 <button
                   type="button"
-                  className={snapshot.modules.visual.fullscreen ? "selected" : ""}
+                  className={actionButtonClass("visual", "setFullscreen", "visual-fullscreen", snapshot.modules.visual.fullscreen)}
                   onClick={() => sendControl("visual", "setFullscreen", "visual-fullscreen", !snapshot.modules.visual.fullscreen)}
                 >
                   {ui.visual.fullscreen}
@@ -1465,7 +1546,7 @@ function App() {
                   {visualTextStyles.map((style) => <option key={style} value={style}>{style}</option>)}
                 </select>
                 <input value={manualText} onChange={(event) => setManualText(event.target.value)} />
-                <button type="submit"><Send size={15} /> {ui.actions.send}</button>
+                <button type="submit" className={actionButtonClass("visual", "setText", "visual-text")}><Send size={15} /> {ui.actions.send}</button>
               </form>
             </Panel>
           </section>
@@ -1487,7 +1568,7 @@ function App() {
               <div className="source-list">
                 {audioSources.map((source) => (
                   <article key={source.sourceId} className={source.muted ? "source-row muted" : "source-row"}>
-                    <button type="button" onClick={() => sendControl("audio", "setMute", source.sourceId, !source.muted)}>
+                    <button type="button" className={actionButtonClass("audio", "setMute", source.sourceId)} onClick={() => sendControl("audio", "setMute", source.sourceId, !source.muted)}>
                       {source.muted ? ui.actions.unmute : ui.actions.mute}
                     </button>
                     <div>
@@ -1504,7 +1585,7 @@ function App() {
                   <button
                     key={preset}
                     type="button"
-                    className={snapshot.modules.audio.activePreset === preset ? "selected" : ""}
+                    className={actionButtonClass("audio", "setPreset", "audio-preset", snapshot.modules.audio.activePreset === preset)}
                     onClick={() => sendControl("audio", "setPreset", "audio-preset", preset)}
                   >
                     {preset}
@@ -1617,7 +1698,7 @@ function App() {
                     <span>{ui.interaction.autoRedirect}</span>
                     <button
                       type="button"
-                      className={screenPresentation.autoRedirect ? "selected" : ""}
+                      className={actionButtonClass("interaction", "setScreenAutoRedirect", "screen-routing", screenPresentation.autoRedirect)}
                       onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
                     >
                       {screenPresentation.autoRedirect ? "ON" : "OFF"}

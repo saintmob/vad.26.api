@@ -102,7 +102,9 @@ button {
   font-weight: 600;
   letter-spacing: -0.01em;
   cursor: pointer;
+  position: relative;
   transition:
+    transform 90ms ease,
     border-color 120ms ease,
     background 120ms ease,
     color 120ms ease,
@@ -114,10 +116,44 @@ button:hover {
   background: color-mix(in srgb, var(--surface) 88%, var(--brand) 12%);
 }
 
+button:active {
+  transform: translateY(1px) scale(0.985);
+  background: color-mix(in srgb, var(--surface) 78%, var(--brand) 22%);
+}
+
 button.selected {
   border-color: var(--accent, var(--interaction));
   background: color-mix(in srgb, var(--surface) 82%, var(--accent, var(--interaction)) 18%);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, var(--interaction)) 42%, transparent);
+}
+
+button.is-pending {
+  border-color: color-mix(in srgb, var(--visual) 62%, var(--border));
+  color: color-mix(in srgb, var(--text) 82%, var(--visual));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--visual) 34%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--visual) 64%, transparent);
+}
+
+button.is-pending::after {
+  content: "";
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--visual);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--visual) 70%, transparent);
+  animation: sync-pulse 0.8s ease-in-out infinite alternate;
+}
+
+button:disabled,
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.48;
+  transform: none;
+  box-shadow: none;
 }
 
 button:focus-visible,
@@ -337,6 +373,18 @@ input::placeholder {
 .connection-dot.connecting {
   background: var(--interaction);
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--interaction) 16%, transparent);
+}
+
+.sync-chip--sending {
+  border-color: color-mix(in srgb, var(--visual) 50%, var(--border));
+}
+
+.sync-chip--synced {
+  border-color: color-mix(in srgb, var(--audio) 38%, var(--border));
+}
+
+.sync-chip--error {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
 .settings-trigger {
@@ -1459,6 +1507,15 @@ input::placeholder {
   transition: all 0.2s ease;
 }
 
+.screen-grid button:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+.screen-grid button:active {
+  filter: brightness(0.94);
+}
+
 .screen-grid.selection-mode-box button {
   pointer-events: none;
 }
@@ -1471,6 +1528,45 @@ input::placeholder {
   color: var(--muted);
   font-size: 10px;
   line-height: 1;
+}
+
+.screen-grid button small {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  min-width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--audio) 16%, var(--surface));
+  color: var(--audio);
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.device-dot {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--soft) 12%, transparent);
+}
+
+.screen-grid .device-dot {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+}
+
+.screen-grid button.is-online .device-dot,
+.route-table article.is-online .device-dot {
+  background: var(--audio);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--audio) 18%, transparent),
+    0 0 10px color-mix(in srgb, var(--audio) 58%, transparent);
 }
 
 .screen-grid button.owner-vj,
@@ -2011,6 +2107,10 @@ input::placeholder {
   transition: all 0.2s ease;
 }
 
+.route-table article.is-online {
+  border-color: color-mix(in srgb, var(--audio) 36%, var(--border));
+}
+
 .route-table article.selected {
   background: color-mix(in srgb, var(--brand) 12%, var(--surface-2));
   border-color: var(--brand);
@@ -2027,6 +2127,12 @@ input::placeholder {
 .route-table span,
 .route-table small {
   display: block;
+}
+
+.route-table strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .route-table span {
