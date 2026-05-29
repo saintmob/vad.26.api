@@ -150,6 +150,7 @@ const storageKeys = {
 type ServerMessage =
   | { type: "state.snapshot"; state: PerformanceState }
   | { type: "state.patch"; state?: PerformanceState; module: ModuleName; patch: Record<string, unknown>; updatedAt?: number }
+  | { type: "show.patch"; patch: PerformanceState["show"]; updatedAt?: number }
   | { type: "control.ack"; ok: boolean; command: ControlCommand }
   | { type: "client.presence"; state?: PerformanceState }
   | { type: "error"; error: string }
@@ -695,6 +696,9 @@ function App() {
         if (isStateSnapshot(message)) setSnapshot(message.state);
         if (isStatePatch(message)) {
           setSnapshot((current) => message.state || (current ? applyStatePatch(current, message) : current));
+        }
+        if (isShowPatch(message)) {
+          setSnapshot((current) => current ? applyShowPatch(current, message) : current);
         }
         if (isControlAck(message)) setLastAck(`${message.command.command} accepted for ${message.command.target}`);
         if (isErrorMessage(message)) setLastAck(message.error);
@@ -1686,6 +1690,9 @@ function ScreenGateway({ screenId }: { screenId: string }) {
         if (isStatePatch(serverMessage)) {
           setSnapshot((current) => serverMessage.state || (current ? applyStatePatch(current, serverMessage) : current));
         }
+        if (isShowPatch(serverMessage)) {
+          setSnapshot((current) => current ? applyShowPatch(current, serverMessage) : current);
+        }
       });
       socket.addEventListener("close", () => {
         if (closed) return;
@@ -1789,14 +1796,30 @@ function isStatePatch(message: ServerMessage): message is Extract<ServerMessage,
   return message.type === "state.patch";
 }
 
+function isShowPatch(message: ServerMessage): message is Extract<ServerMessage, { type: "show.patch" }> {
+  return message.type === "show.patch";
+}
+
 function applyStatePatch(state: PerformanceState, message: Extract<ServerMessage, { type: "state.patch" }>): PerformanceState {
+  const { audioSources, ...modulePatch } = message.patch;
   return {
     ...state,
     updatedAt: message.updatedAt || Date.now(),
+    audioSources: isPlainRecord(audioSources)
+      ? mergePatch(state.audioSources, audioSources)
+      : state.audioSources,
     modules: {
       ...state.modules,
-      [message.module]: mergePatch(state.modules[message.module], message.patch)
+      [message.module]: mergePatch(state.modules[message.module], modulePatch)
     }
+  };
+}
+
+function applyShowPatch(state: PerformanceState, message: Extract<ServerMessage, { type: "show.patch" }>): PerformanceState {
+  return {
+    ...state,
+    updatedAt: message.updatedAt || Date.now(),
+    show: mergePatch(state.show, message.patch as unknown as Record<string, unknown>)
   };
 }
 

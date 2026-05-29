@@ -166,7 +166,16 @@ WebSocket 主要消息：
 - `control.command`
 - `state.snapshot`
 - `state.patch`
+- `show.patch`
 - `control.ack`
+
+同步策略：
+
+- `state.snapshot` 只用于连接、显式 `ui.subscribe` 和重置后的重新基准化。
+- 控制命令不会再向所有 WebSocket 客户端广播完整状态，而是广播命令本身、回执和必要的 `state.patch` / `show.patch`。
+- dashboard/control-room 接收全量控制与状态增量，用于总控台显示。
+- screen-gateway 只接收屏幕路由、拓扑和呈现开关相关的 `interaction` 增量。
+- audio/visual/interaction 模块只接收与自身模块相关的控制命令和状态增量。
 
 常用远程控制命令：
 

@@ -17,7 +17,7 @@ import {
   resolveStateScreenRoutes,
   ShowStateStore
 } from "./state.js";
-import { ClientHelloMessage, JsonRecord, PerformanceState } from "./types.js";
+import { AudioFrame, ClientHelloMessage, ControlCommand, JsonRecord, ModuleName, PerformanceState } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SHOW_CONTROL_PORT = 4300;
@@ -93,6 +93,24 @@ export interface AppServer {
   snapshotWriter: SnapshotWriter | null;
 }
 
+type SocketProfile = {
+  id: string;
+  module: string;
+  role: string;
+  capabilities: Set<string>;
+};
+
+type SyncMessage =
+  | { type: "state.snapshot"; state: PerformanceState }
+  | { type: "state.patch"; module: ModuleName; patch: JsonRecord; updatedAt: number }
+  | { type: "show.patch"; patch: PerformanceState["show"]; updatedAt: number }
+  | { type: "client.presence"; client: unknown; clients: PerformanceState["clients"] }
+  | { type: "control.ack"; ok: true; command: ControlCommand }
+  | ControlCommand
+  | AudioFrame
+  | { type: "module.telemetry"; module?: unknown; event: unknown }
+  | { type: "cue.fire"; module?: unknown; event: unknown };
+
 export function createServer(options: CreateServerOptions = {}) {
   return createAppServer(options).server;
 }
@@ -105,6 +123,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
   const store = new ShowStateStore(initialState);
   const hub = new RealtimeHub();
   const socketOrigins = new WeakMap<WebSocket, string>();
+  const socketProfiles = new WeakMap<WebSocket, SocketProfile>();
   const sseOrigins = new WeakMap<Response, string>();
   const snapshotWriter = options.persist === false ? null : new SnapshotWriter(snapshotPath);
   const app = express();
@@ -187,7 +206,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     const frame = normalizeAudioFrame(req.body);
     store.applyAudioFrame(frame);
     snapshotWriter?.schedule(store.getState());
-    hub.broadcast(frame);
+    broadcastSyncMessage(hub, socketProfiles, frame);
     res.status(202).json({ ok: true, frame, state: resolveStateForRequest(store.getState(), origin) });
   });
 
@@ -209,7 +228,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     }
     store.applyModulePatch(moduleName, patch, String(req.body.source || "rest"));
     snapshotWriter?.schedule(store.getState());
-    hub.broadcast({ type: "state.patch", module: moduleName, patch, updatedAt: store.getState().updatedAt });
+    broadcastSyncMessage(hub, socketProfiles, { type: "state.patch", module: moduleName, patch, updatedAt: store.getState().updatedAt });
     res.status(202).json({ ok: true, module: moduleName, patch, state: resolveStateForRequest(store.getState(), origin) });
   });
 
@@ -222,10 +241,8 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     }
     store.applyControlCommand(command);
     snapshotWriter?.schedule(store.getState());
-    const ack = { type: "control.ack", ok: true, command };
-    hub.broadcast(command);
-    hub.broadcast(ack);
-    broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
+    const ack = { type: "control.ack", ok: true, command } as const;
+    broadcastControlSync(hub, store, command, ack, socketProfiles);
     res.status(202).json({ ok: true, command, state: resolveStateForRequest(store.getState(), origin) });
   });
 
@@ -251,7 +268,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     }
   });
 
-  attachWebSocket(server, hub, store, snapshotWriter, options, socketOrigins, sseOrigins);
+  attachWebSocket(server, hub, store, snapshotWriter, options, socketOrigins, socketProfiles, sseOrigins);
 
   if (options.serveClient) {
     addClientRoutes(app);
@@ -278,6 +295,7 @@ function attachWebSocket(
   snapshotWriter: SnapshotWriter | null,
   options: CreateServerOptions,
   socketOrigins: WeakMap<WebSocket, string>,
+  socketProfiles: WeakMap<WebSocket, SocketProfile>,
   sseOrigins: WeakMap<Response, string>
 ) {
   const wss = new WebSocketServer({ noServer: true });
@@ -319,8 +337,7 @@ function attachWebSocket(
       const client = store.removeClient(clientId);
       if (client) {
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast({ type: "client.presence", client, clients: store.getState().clients });
-        broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
+        broadcastSyncMessage(hub, socketProfiles, { type: "client.presence", client, clients: store.getState().clients });
       }
     });
 
@@ -335,8 +352,14 @@ function attachWebSocket(
       if (message.type === "client.hello") {
         const client = store.registerClient(message as unknown as ClientHelloMessage, fallbackId);
         clientId = client.id;
+        socketProfiles.set(socket, {
+          id: client.id,
+          module: client.module,
+          role: client.role,
+          capabilities: new Set(client.capabilities)
+        });
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast({ type: "client.presence", client, clients: store.getState().clients });
+        broadcastSyncMessage(hub, socketProfiles, { type: "client.presence", client, clients: store.getState().clients });
         hub.send(socket, { type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin) });
         return;
       }
@@ -357,7 +380,7 @@ function attachWebSocket(
         const frame = normalizeAudioFrame(message);
         store.applyAudioFrame(frame);
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast(frame);
+        broadcastSyncMessage(hub, socketProfiles, frame);
         return;
       }
 
@@ -370,14 +393,14 @@ function attachWebSocket(
         const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
         store.applyModulePatch(message.module, patch, String(message.source || clientId || "ws"));
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast({ type: "state.patch", module: message.module, patch, updatedAt: store.getState().updatedAt });
+        broadcastSyncMessage(hub, socketProfiles, { type: "state.patch", module: message.module, patch, updatedAt: store.getState().updatedAt });
         return;
       }
 
       if (message.type === "module.telemetry") {
         const event = store.appendEvent("module.telemetry", String(message.module || "unknown"), String(message.source || clientId || "ws"), "Module telemetry", message);
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast({ type: "module.telemetry", event, state: store.getState() });
+        broadcastSyncMessage(hub, socketProfiles, { type: "module.telemetry", module: message.module, event });
         return;
       }
 
@@ -389,16 +412,14 @@ function attachWebSocket(
         }
         store.applyControlCommand(command);
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast(command);
-        hub.broadcast({ type: "control.ack", ok: true, command });
-        broadcastSnapshot(hub, store, origin, socketOrigins, sseOrigins);
+        broadcastControlSync(hub, store, command, { type: "control.ack", ok: true, command }, socketProfiles);
         return;
       }
 
       if (message.type === "cue.fire") {
         const event = store.appendEvent("cue.fire", String(message.module || "show"), String(message.source || clientId || "ws"), String(message.cue || "cue.fire"), message);
         snapshotWriter?.schedule(store.getState());
-        hub.broadcast({ type: "cue.fire", event, state: store.getState() });
+        broadcastSyncMessage(hub, socketProfiles, { type: "cue.fire", module: message.module, event });
         return;
       }
 
@@ -428,6 +449,173 @@ function messageHasToken(message: JsonRecord, queryToken: string | undefined, op
   const requiredToken = options.controlToken ?? process.env.CONTROL_TOKEN;
   if (!requiredToken) return true;
   return message.token === requiredToken || message.authToken === requiredToken || queryToken === requiredToken;
+}
+
+function broadcastControlSync(
+  hub: RealtimeHub,
+  store: ShowStateStore,
+  command: ControlCommand,
+  ack: { type: "control.ack"; ok: true; command: ControlCommand },
+  socketProfiles: WeakMap<WebSocket, SocketProfile>
+) {
+  broadcastSyncMessage(hub, socketProfiles, command);
+  broadcastSyncMessage(hub, socketProfiles, ack);
+  for (const message of buildControlPatchMessages(command, store.getState())) {
+    broadcastSyncMessage(hub, socketProfiles, message);
+  }
+}
+
+function buildControlPatchMessages(command: ControlCommand, state: PerformanceState): SyncMessage[] {
+  const updatedAt = state.updatedAt;
+
+  if (command.module === "show") {
+    const audioPatch: JsonRecord = {};
+    if (["play", "pause", "stop", "reset"].includes(command.command)) {
+      audioPatch.transport = state.modules.audio.transport;
+    }
+    if (command.command === "setBpm") {
+      audioPatch.bpm = state.modules.audio.bpm;
+    }
+    return [
+      { type: "show.patch", patch: state.show, updatedAt },
+      ...(Object.keys(audioPatch).length ? [{ type: "state.patch" as const, module: "audio" as const, patch: audioPatch, updatedAt }] : [])
+    ];
+  }
+
+  if (command.module === "audio") {
+    return [{ type: "state.patch", module: "audio", patch: pickAudioControlPatch(command, state), updatedAt }];
+  }
+
+  if (command.module === "visual" || command.module === "video") {
+    return [{ type: "state.patch", module: "visual", patch: pickVisualControlPatch(command, state), updatedAt }];
+  }
+
+  if (command.module === "interaction") {
+    return [{ type: "state.patch", module: "interaction", patch: pickInteractionControlPatch(command, state), updatedAt }];
+  }
+
+  return [{ type: "show.patch", patch: state.show, updatedAt }];
+}
+
+function pickAudioControlPatch(command: ControlCommand, state: PerformanceState): JsonRecord {
+  if (["setMute", "setGain"].includes(command.command)) {
+    return {
+      activeSourceId: state.modules.audio.activeSourceId,
+      masterLevel: state.modules.audio.masterLevel,
+      audioSources: { [command.target]: state.audioSources[command.target] }
+    };
+  }
+  if (command.command === "setMasterLevel") return { masterLevel: state.modules.audio.masterLevel };
+  if (command.command === "setPreset") return { activePreset: state.modules.audio.activePreset };
+  if (command.command === "setActiveTab") return { activeTab: state.modules.audio.activeTab };
+  return state.modules.audio as unknown as JsonRecord;
+}
+
+function pickVisualControlPatch(command: ControlCommand, state: PerformanceState): JsonRecord {
+  if (["setScene", "focusVideo"].includes(command.command)) {
+    return { scene: state.modules.visual.scene, preset: state.modules.visual.preset };
+  }
+  if (command.command === "setPreset") return { preset: state.modules.visual.preset };
+  if (command.command === "setText") return { text: state.modules.visual.text };
+  if (command.command === "setAudioDrive") return { audioDriveMode: state.modules.visual.audioDriveMode };
+  if (command.command === "setFullscreen") return { fullscreen: state.modules.visual.fullscreen };
+  if (command.command === "setColors") return { colors: state.modules.visual.colors };
+  if (command.command === "setFx") return { fx: state.modules.visual.fx };
+  return state.modules.visual as unknown as JsonRecord;
+}
+
+function pickInteractionControlPatch(command: ControlCommand, state: PerformanceState): JsonRecord {
+  const interaction = state.modules.interaction;
+  if (["setInteractionMode", "setMode"].includes(command.command)) {
+    return { mode: interaction.mode, visualMode: interaction.visualMode };
+  }
+  if (command.command === "setIntensity") return { intensity: interaction.intensity };
+  if (command.command === "resetTree") {
+    return {
+      mode: interaction.mode,
+      intensity: interaction.intensity,
+      treeGrowth: interaction.treeGrowth,
+      gestureActive: interaction.gestureActive,
+      visualMode: interaction.visualMode
+    };
+  }
+  if (command.command === "setVisualMode") return { visualMode: interaction.visualMode };
+  if (command.command === "setFireworkState") return { fireworkState: interaction.fireworkState, visualMode: interaction.visualMode };
+  if (command.command === "pulseScreen") return { screenPulse: interaction.screenPulse };
+  if (command.command === "setScreen") return { screenId: interaction.screenId, role: interaction.role };
+  if (["setScreenOwner", "setScreenRoutePreset"].includes(command.command)) {
+    return { screenRoutePreset: interaction.screenRoutePreset, screenRoutes: interaction.screenRoutes };
+  }
+  if (["setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenPresentation"].includes(command.command)) {
+    return { screenPresentation: interaction.screenPresentation };
+  }
+  if (command.command === "setOperationLock") return {};
+  return interaction as unknown as JsonRecord;
+}
+
+function broadcastSyncMessage(
+  hub: RealtimeHub,
+  socketProfiles: WeakMap<WebSocket, SocketProfile>,
+  message: SyncMessage
+) {
+  hub.forEachSocket((socket) => {
+    const profile = socketProfiles.get(socket);
+    if (shouldDeliverToSocket(profile, message)) {
+      hub.send(socket, message);
+    }
+  });
+  hub.forEachSseClient((client) => {
+    const payload = JSON.stringify(message);
+    client.write(`event: ${message.type}\n`);
+    client.write(`data: ${payload}\n\n`);
+  });
+}
+
+function shouldDeliverToSocket(profile: SocketProfile | undefined, message: SyncMessage) {
+  if (!profile) return true;
+  if (message.type === "client.presence") return isDashboardProfile(profile);
+  if (message.type === "control.ack") return isDashboardProfile(profile) || profile.id === message.command.issuedBy;
+  if (message.type === "control.command") return shouldDeliverControl(profile, message);
+  if (message.type === "state.patch") return shouldDeliverModulePatch(profile, message.module, message.patch);
+  if (message.type === "show.patch") return !isScreenGatewayProfile(profile) || isDashboardProfile(profile);
+  if (message.type === "mixer.audioFrame") return isDashboardProfile(profile) || profile.module === "audio" || profile.module === "visual";
+  if (message.type === "module.telemetry" || message.type === "cue.fire") return isDashboardProfile(profile);
+  return true;
+}
+
+function shouldDeliverControl(profile: SocketProfile, command: ControlCommand) {
+  if (isDashboardProfile(profile)) return true;
+  if (isScreenGatewayProfile(profile)) return false;
+  if (command.module === "show") return profile.module !== "unknown";
+  if (command.module === "video") return profile.module === "visual";
+  if (command.module === "guest") return false;
+  return profile.module === command.module;
+}
+
+function shouldDeliverModulePatch(profile: SocketProfile, moduleName: ModuleName, patch: JsonRecord) {
+  if (isDashboardProfile(profile)) return true;
+  if (isScreenGatewayProfile(profile)) {
+    return moduleName === "interaction" && isRoutePatch(patch);
+  }
+  return profile.module === moduleName || profile.capabilities.has(`state.${moduleName}`);
+}
+
+function isDashboardProfile(profile: SocketProfile) {
+  return profile.module === "dashboard" && !isScreenGatewayProfile(profile);
+}
+
+function isScreenGatewayProfile(profile: SocketProfile) {
+  return profile.role === "screen-gateway" || profile.capabilities.has("screen.route");
+}
+
+function isRoutePatch(patch: JsonRecord) {
+  return Boolean(
+    patch.screenRoutes ||
+    patch.screenRoutePreset ||
+    patch.screenPresentation ||
+    patch.screenTopology ||
+    patch.screenRegistry
+  );
 }
 
 function broadcastSnapshot(

@@ -28,6 +28,7 @@ export const performanceSpec = {
       serverMessages: [
         "state.snapshot",
         "state.patch",
+        "show.patch",
         "mixer.audioFrame",
         "module.telemetry",
         "control.command",
@@ -69,6 +70,16 @@ export const performanceSpec = {
         patch: { type: "object" },
         updatedAt: { type: "number" },
         note: { const: "Lightweight patch event; clients that need full state should request state.snapshot or GET /api/state." }
+      }
+    },
+    showPatch: {
+      type: "object",
+      required: ["type", "patch"],
+      properties: {
+        type: { const: "show.patch" },
+        patch: { type: "object" },
+        updatedAt: { type: "number" },
+        note: { const: "Show transport/status patch emitted after show control commands; full snapshots are reserved for connect, subscribe, and reset." }
       }
     },
     controlCommand: {

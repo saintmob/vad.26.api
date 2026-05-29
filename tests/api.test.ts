@@ -601,6 +601,74 @@ test("websocket sends snapshots, presence, state patches, and control acknowledg
   });
 });
 
+test("websocket filters sync traffic by client role and avoids control snapshots", async () => {
+  await withServer(async (baseUrl) => {
+    const dashboard = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+    const screenGateway = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+    try {
+      const dashboardInitialSnapshot = waitForMessage(dashboard, (message) => message.type === "state.snapshot", 2000);
+      const screenInitialSnapshot = waitForMessage(screenGateway, (message) => message.type === "state.snapshot", 2000);
+      await Promise.all([waitForSocketOpen(dashboard), waitForSocketOpen(screenGateway)]);
+      await Promise.all([dashboardInitialSnapshot, screenInitialSnapshot]);
+
+      dashboard.send(JSON.stringify({
+        type: "client.hello",
+        clientId: "test-dashboard",
+        module: "dashboard",
+        role: "control-room",
+        capabilities: ["state.read", "control.command", "dashboard"]
+      }));
+      await waitForMessage(dashboard, (message) => message.type === "state.snapshot", 2000);
+
+      screenGateway.send(JSON.stringify({
+        type: "client.hello",
+        clientId: "screen-gateway-A1",
+        module: "dashboard",
+        role: "screen-gateway",
+        capabilities: ["state.read", "screen.route"]
+      }));
+      await waitForMessage(screenGateway, (message) => message.type === "state.snapshot", 2000);
+
+      const ackPromise = waitForMessage(dashboard, (message) => message.type === "control.ack", 2000);
+      const dashboardPatchPromise = waitForMessage(dashboard, (message) => message.type === "state.patch" && message.module === "interaction", 2000);
+      dashboard.send(JSON.stringify({
+        type: "control.command",
+        module: "interaction",
+        target: "interaction-mode",
+        command: "setMode",
+        value: "flow",
+        issuedBy: "test-dashboard"
+      }));
+
+      const ack = await ackPromise;
+      assert.equal(ack.command.command, "setMode");
+      const dashboardPatch = await dashboardPatchPromise;
+      assert.equal(dashboardPatch.patch.mode, "flow");
+      await expectNoMessage(screenGateway, (message) => ["state.snapshot", "state.patch", "control.command", "control.ack"].includes(message.type), 150);
+
+      const routePatchPromise = waitForMessage(
+        screenGateway,
+        (message) => message.type === "state.patch" && message.module === "interaction" && message.patch.screenRoutes,
+        2000
+      );
+      dashboard.send(JSON.stringify({
+        type: "control.command",
+        module: "interaction",
+        target: "A1",
+        command: "setScreenOwner",
+        value: "diagnostic",
+        issuedBy: "test-dashboard"
+      }));
+
+      const routePatch = await routePatchPromise;
+      assert.equal(routePatch.patch.screenRoutes.A1.owner, "diagnostic");
+    } finally {
+      if (dashboard.readyState !== WebSocket.CLOSED) dashboard.terminate();
+      if (screenGateway.readyState !== WebSocket.CLOSED) screenGateway.terminate();
+    }
+  });
+});
+
 function waitForSocketOpen(ws: WebSocket) {
   return new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -647,6 +715,36 @@ function waitForMessage(ws: WebSocket, predicate: (message: any) => boolean, tim
       if (!predicate(message)) return;
       cleanup();
       resolve(message);
+    };
+
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("error", onError);
+    };
+
+    ws.on("message", onMessage);
+    ws.on("error", onError);
+  });
+}
+
+function expectNoMessage(ws: WebSocket, predicate: (message: any) => boolean, timeoutMs = 100): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, timeoutMs);
+
+    const onMessage = (raw: WebSocket.RawData) => {
+      const message = JSON.parse(raw.toString());
+      if (!predicate(message)) return;
+      cleanup();
+      reject(new Error(`Unexpected WebSocket message: ${message.type}`));
     };
 
     const onError = (error: Error) => {
