@@ -432,7 +432,7 @@ function requireToken(options: CreateServerOptions) {
   return (req: Request, res: Response, next: express.NextFunction) => {
     const requiredToken = options.controlToken ?? process.env.CONTROL_TOKEN;
     if (!requiredToken) {
-      next();
+      res.status(401).json({ ok: false, error: "CONTROL_TOKEN is required" });
       return;
     }
     const bearer = req.headers.authorization?.replace(/^Bearer\s+/i, "");
@@ -447,7 +447,7 @@ function requireToken(options: CreateServerOptions) {
 
 function messageHasToken(message: JsonRecord, queryToken: string | undefined, options: CreateServerOptions) {
   const requiredToken = options.controlToken ?? process.env.CONTROL_TOKEN;
-  if (!requiredToken) return true;
+  if (!requiredToken) return false;
   return message.token === requiredToken || message.authToken === requiredToken || queryToken === requiredToken;
 }
 

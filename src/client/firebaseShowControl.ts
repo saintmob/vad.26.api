@@ -56,6 +56,9 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
   if (!isFirebaseRealtimeConfigured) {
     throw new Error("VITE_FIREBASE_DATABASE_URL is not configured");
   }
+  if (!options.token.trim()) {
+    throw new Error("Control token is required");
+  }
 
   const rootPath = `shows/${safePath(firebaseShowId)}`;
   let closed = false;

@@ -275,14 +275,14 @@ export class ShowRoomDurableObject {
 
   private async requireToken(request: Request) {
     const token = this.env.CONTROL_TOKEN || "";
-    if (!token) return;
+    if (!token) throw new Error("CONTROL_TOKEN is required");
     const supplied = request.headers.get("x-control-token") || request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || new URL(request.url).searchParams.get("token");
     if (supplied !== token) throw new Error("Unauthorized");
   }
 
   private hasToken(message: JsonRecord, request: Request) {
     const token = this.env.CONTROL_TOKEN || "";
-    if (!token) return true;
+    if (!token) return false;
     return message.token === token || message.authToken === token || new URL(request.url).searchParams.get("token") === token;
   }
 

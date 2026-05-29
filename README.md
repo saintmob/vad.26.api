@@ -195,69 +195,11 @@ WebSocket 主要消息：
 
 ## 鉴权
 
-本地排练可以不设置 token。若设置：
+控制令牌是必要运行条件。`CONTROL_TOKEN` 为空时，写接口与 WebSocket 控制消息会被拒绝；前端控制台 token 为空时不会连接控制通道。
 
-## 线上备用：Cloudflare + Firebase
+## 部署说明
 
-推荐线上备用采用“双保险”：
-
-- 主通道：Cloudflare Worker + Durable Object，提供 `/ws`、`/api/state`、`/api/control`、`/api/mixer/frame`、`/api/modules/:module/state`。
-- 降级通道：Firebase Realtime Database transport，只同步控制命令、状态增量、ack、presence，不建议原频率同步音频帧。
-
-Cloudflare 主通道特性：
-
-- 一个 `showId` 对应一个 Durable Object room。
-- 支持 1 台指定 DJ 设备向总控发布 `mixer.audioFrame`。
-- 支持总控向 20 台屏幕按角色过滤分发 `control.command`、`state.patch`、`show.patch`。
-- 支持屏幕路由切换到 VJ 或 baofa 线上域名。
-
-Cloudflare 配置：
-
-```bash
-# wrangler secret put CONTROL_TOKEN
-# 修改 wrangler.jsonc vars:
-# DEFAULT_SHOW_ID=show-main
-# PRIMARY_DJ_CLIENT_ID=dj-main
-# VJ_SCREEN_ORIGIN=https://<your-vj-domain>
-# BAOFA_SCREEN_ORIGIN=https://<your-baofa-domain>
-npm run build:worker
-```
-
-线上前端环境变量：
-
-```bash
-VITE_SHOW_TRANSPORT=websocket
-VITE_SHOW_BACKEND_URL=https://<your-worker-domain>
-VITE_SHOW_WS_URL=wss://<your-worker-domain>/ws
-VITE_SHOW_ID=show-main
-VITE_CONTROL_TOKEN=<same token if enabled>
-```
-
-Firebase 降级配置：
-
-```bash
-VITE_SHOW_TRANSPORT=firebase
-VITE_FIREBASE_DATABASE_URL=https://<project>.firebaseio.com
-VITE_SHOW_ID=show-main
-VITE_CONTROL_TOKEN=<same token if enabled>
-```
-
-注意：Cloudflare Free Tier 下应继续保持音频帧节流。现场 20 屏推荐 DJ 只发送必要音频摘要，屏幕端只消费自身相关控制与路由增量。
-
-```bash
-CONTROL_TOKEN=your-token
-```
-
-则 mutating REST 请求与 WebSocket 控制消息需要携带：
-
-- Header：`x-control-token: your-token`
-- 或 WebSocket query：`ws://<LAN_IP>:4300/ws?token=your-token`
-
-`VITE_CONTROL_TOKEN` 只适合本地/LAN 前端自动填入控制台使用。所有 `VITE_` 变量都会进入浏览器 bundle，不是秘密；公网部署时不要把高权限 token 放在 `VITE_CONTROL_TOKEN` 里。
-
-## Vercel / 远程部署说明
-
-这个项目可以构建 Dashboard，但现场实时 WebSocket 与本地多模块联动优先使用本机或 LAN。Vercel Serverless 环境不适合作为现场实时总线；如果要公网部署，需要替换为可持续连接的实时服务，并重新配置各模块的后端地址。
+线上与备用通道的地址、供应商和运行细节不写入公开 README。内部开发者按当前代码默认配置运行，只需在受控环境中填写同一个控制令牌。
 
 ## 开发注意
 

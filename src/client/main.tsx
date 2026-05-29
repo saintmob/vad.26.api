@@ -648,6 +648,14 @@ function App() {
     let firebaseClient: ReturnType<typeof createFirebaseDashboardClient> | null = null;
     let firebaseFallbackStarted = false;
 
+    if (!token.trim()) {
+      setConnection("offline");
+      setLastAck("Control token is required");
+      return () => {
+        closed = true;
+      };
+    }
+
     async function boot() {
       try {
         const state = await fetchJson<PerformanceState>("/api/state");
@@ -729,6 +737,7 @@ function App() {
   }, [token]);
 
   const postJson = React.useCallback(async <T,>(url: string, body: unknown): Promise<T> => {
+    if (!token.trim()) throw new Error("Control token is required");
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (token) headers["x-control-token"] = token;
     const response = await fetch(url, {

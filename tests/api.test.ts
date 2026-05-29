@@ -8,15 +8,36 @@ import WebSocket from "ws";
 import { createServer, type CreateServerOptions } from "../src/server.js";
 
 async function withServer(fn: (baseUrl: string, server: http.Server) => Promise<void>, options: CreateServerOptions = {}) {
-  const server = createServer({ persist: false, loadSnapshot: false, ...options });
+  const autoAuth = options.controlToken === undefined;
+  const controlToken = options.controlToken ?? "test-token";
+  const server = createServer({ persist: false, loadSnapshot: false, ...options, controlToken });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert(address && typeof address === "object");
+  const originalFetch = globalThis.fetch;
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  if (autoAuth) {
+    globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const method = String(init?.method || (typeof input === "object" && "method" in input ? input.method : "GET")).toUpperCase();
+      if (url.startsWith(baseUrl) && method !== "GET") {
+        const headers = new Headers(init?.headers || (typeof input === "object" && "headers" in input ? input.headers : undefined));
+        if (!headers.has("x-control-token")) headers.set("x-control-token", controlToken);
+        return originalFetch(input, { ...init, headers });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+  }
   try {
-    await fn(`http://127.0.0.1:${address.port}`, server);
+    await fn(baseUrl, server);
   } finally {
+    globalThis.fetch = originalFetch;
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+}
+
+function wsUrl(baseUrl: string) {
+  return `${baseUrl.replace("http", "ws")}/ws?token=test-token`;
 }
 
 function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string) {
@@ -552,7 +573,7 @@ test("enforces CONTROL_TOKEN when configured", async () => {
 
 test("websocket sends snapshots, presence, state patches, and control acknowledgements", async () => {
   await withServer(async (baseUrl) => {
-    const ws = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+    const ws = new WebSocket(wsUrl(baseUrl));
     try {
       const snapshotPromise = waitForMessage(ws, (message) => message.type === "state.snapshot", 2000);
       await waitForSocketOpen(ws);
@@ -603,8 +624,8 @@ test("websocket sends snapshots, presence, state patches, and control acknowledg
 
 test("websocket filters sync traffic by client role and avoids control snapshots", async () => {
   await withServer(async (baseUrl) => {
-    const dashboard = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
-    const screenGateway = new WebSocket(baseUrl.replace("http", "ws") + "/ws");
+    const dashboard = new WebSocket(wsUrl(baseUrl));
+    const screenGateway = new WebSocket(wsUrl(baseUrl));
     try {
       const dashboardInitialSnapshot = waitForMessage(dashboard, (message) => message.type === "state.snapshot", 2000);
       const screenInitialSnapshot = waitForMessage(screenGateway, (message) => message.type === "state.snapshot", 2000);
