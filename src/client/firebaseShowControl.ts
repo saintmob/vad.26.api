@@ -89,9 +89,14 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
   let latestEvents: EventLogItem[] = [];
   let lastAckTimestamp = 0;
 
+  const hydrateRemoteState = (remoteState: unknown): PerformanceState => {
+    if (!isRecord(remoteState)) return options.initialState;
+    return mergePatch(options.initialState, remoteState) as PerformanceState;
+  };
+
   const emit = () => {
     options.onState({
-      ...latestState,
+      ...hydrateRemoteState(latestState),
       clients: latestClients,
       eventLog: latestEvents
     });
@@ -104,10 +109,13 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
       options.onStatus("connecting");
       const existing = await firebaseGet<PerformanceState>(`${rootPath}/state`);
       if (!existing) {
-        await firebasePut(`${rootPath}/state`, {
+        latestState = {
           ...options.initialState,
           updatedAt: Date.now()
-        });
+        };
+        await firebasePut(`${rootPath}/state`, latestState);
+      } else {
+        latestState = hydrateRemoteState(existing);
       }
 
       await firebasePut(`${rootPath}/clients/dashboard-main`, makeClientInfo("online"));
@@ -115,7 +123,7 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
       streams.push(openStream(`${rootPath}/state`, async () => {
         if (closed) return;
         const state = await firebaseGet<PerformanceState>(`${rootPath}/state`);
-        if (state) latestState = state;
+        if (state) latestState = hydrateRemoteState(state);
         emit();
       }));
 
@@ -177,6 +185,7 @@ export function createFirebaseDashboardClient(options: DashboardClientOptions) {
         ...options.initialState,
         updatedAt: Date.now()
       };
+      latestState = nextState;
       await firebasePut(`${rootPath}/state`, nextState);
       await pushEvent(rootPath, "show.reset", "show", "dashboard-main", "Show state reset", {});
       options.onState(nextState);
@@ -457,6 +466,17 @@ function findLatestAck(value: unknown) {
 
 function clampUnit(value: number) {
   return Math.max(0, Math.min(1, value));
+}
+
+function mergePatch<T>(base: T, patch: Record<string, unknown>): T {
+  if (!isRecord(base)) return patch as T;
+  const next: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    next[key] = isRecord(value) && isRecord(next[key])
+      ? mergePatch(next[key], value)
+      : value;
+  }
+  return next as T;
 }
 
 function safePath(value: string) {
