@@ -68,6 +68,8 @@ const SCREEN_TOPOLOGY = [
 ];
 
 const VJ_SCREEN_IDS = new Set<string>(["A1"]);
+const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
+const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -639,8 +641,8 @@ function makeScreenRoutes(preset: ScreenRoutePreset, updatedAt: number, origin: 
 }
 
 function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source: string, origin: string, env: Env) {
-  const vjOrigin = env.VJ_SCREEN_ORIGIN || origin;
-  const baofaOrigin = env.BAOFA_SCREEN_ORIGIN || origin;
+  const vjOrigin = env.VJ_SCREEN_ORIGIN || origin || HOSTED_VJ_SCREEN_ORIGIN;
+  const baofaOrigin = env.BAOFA_SCREEN_ORIGIN || origin || HOSTED_BAOFA_SCREEN_ORIGIN;
   return {
     screenId,
     owner,

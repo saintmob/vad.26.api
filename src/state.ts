@@ -37,8 +37,18 @@ const SCREEN_TOPOLOGY = [
 
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
+const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
+const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
   const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
+  return origin ? `${origin.protocol}//${origin.host}` : null;
+})();
+const CONFIGURED_VJ_SCREEN_ORIGIN = (() => {
+  const origin = normalizeScreenRouteOrigin(process.env.VJ_SCREEN_ORIGIN);
+  return origin ? `${origin.protocol}//${origin.host}` : null;
+})();
+const CONFIGURED_BAOFA_SCREEN_ORIGIN = (() => {
+  const origin = normalizeScreenRouteOrigin(process.env.BAOFA_SCREEN_ORIGIN);
   return origin ? `${origin.protocol}//${origin.host}` : null;
 })();
 
@@ -718,15 +728,32 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
 
 export function resolveScreenRouteUrl(origin: string | null | undefined, owner: ScreenOwner, screenId: string) {
   if (owner !== "vj" && owner !== "baofa") return null;
-  const port = owner === "vj" ? 4302 : 4303;
   const normalizedOrigin = normalizeScreenRouteOrigin(origin);
-  if (!normalizedOrigin) return null;
-  const url = new URL(`${normalizedOrigin.protocol}//${normalizedOrigin.host}`);
-  url.port = String(port);
+  const configuredOwnerOrigin = owner === "vj" ? CONFIGURED_VJ_SCREEN_ORIGIN : CONFIGURED_BAOFA_SCREEN_ORIGIN;
+  const hostedOwnerOrigin = owner === "vj" ? HOSTED_VJ_SCREEN_ORIGIN : HOSTED_BAOFA_SCREEN_ORIGIN;
+  const routeOrigin = configuredOwnerOrigin || (normalizedOrigin && isLanRouteOrigin(normalizedOrigin) ? `${normalizedOrigin.protocol}//${hostnameFromOrigin(normalizedOrigin.host)}:${owner === "vj" ? 4302 : 4303}` : hostedOwnerOrigin);
+  const url = new URL(routeOrigin);
   url.pathname = `/screen/${encodeURIComponent(screenId)}`;
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function hostnameFromOrigin(host: string) {
+  return host.replace(/:\d+$/, "");
+}
+
+function isLanRouteOrigin(origin: { host: string }) {
+  const host = hostnameFromOrigin(origin.host).toLowerCase();
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".local") ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  );
 }
 
 export function resolveStateScreenRoutes(state: PerformanceState, origin: string | null | undefined): PerformanceState {

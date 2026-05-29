@@ -17,6 +17,8 @@ type ClientInfo = PerformanceState["clients"][string];
 const env = (import.meta as any).env || {};
 const databaseUrl = String(env.VITE_FIREBASE_DATABASE_URL || "").replace(/\/$/, "");
 const lanHost = String(env.VITE_LAN_HOST || env.SHOW_LAN_HOST || "").trim();
+const hostedVjScreenOrigin = "https://doit-pearl.vercel.app";
+const hostedBaofaScreenOrigin = "https://baofa.vercel.app";
 
 export const firebaseShowId = env.VITE_SHOW_ID || "show-main";
 
@@ -39,6 +41,26 @@ function getBrowserProtocol() {
 
 function resolveOrigin(port: number) {
   return `${getBrowserProtocol()}//${lanHost || getBrowserHost()}:${port}`;
+}
+
+function isLanRuntime() {
+  const host = getBrowserHost().toLowerCase();
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".local") ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  );
+}
+
+function resolveScreenOrigin(owner: ScreenOwner) {
+  const configured = owner === "vj" ? env.VITE_VJ_SCREEN_ORIGIN : env.VITE_BAOFA_SCREEN_ORIGIN;
+  if (configured) return String(configured).replace(/\/$/, "");
+  if (isLanRuntime()) return resolveOrigin(owner === "vj" ? 4302 : 4303);
+  return owner === "vj" ? hostedVjScreenOrigin : hostedBaofaScreenOrigin;
 }
 
 const screenIds = [
@@ -337,9 +359,9 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
     screenId,
     owner,
     url: owner === "vj"
-      ? `${resolveOrigin(4302)}/screen/${encodeURIComponent(screenId)}`
+      ? `${resolveScreenOrigin(owner)}/screen/${encodeURIComponent(screenId)}`
       : owner === "baofa"
-        ? `${resolveOrigin(4303)}/screen/${encodeURIComponent(screenId)}`
+        ? `${resolveScreenOrigin(owner)}/screen/${encodeURIComponent(screenId)}`
         : null,
     updatedAt,
     source
