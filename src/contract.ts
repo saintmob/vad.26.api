@@ -133,6 +133,18 @@ export const performanceSpec = {
         frequencyBands: {
           type: "array",
           items: { type: "number", minimum: 0, maximum: 1 }
+        },
+        slotIds: {
+          type: "array",
+          items: { type: "string" }
+        },
+        slotNames: {
+          type: "array",
+          items: { type: "string" }
+        },
+        slotCategories: {
+          type: "array",
+          items: { type: "string" }
         }
       }
     }

@@ -20,6 +20,19 @@ export interface AudioFrame {
   muted: boolean;
   speaking: boolean;
   frequencyBands: number[];
+  slotIds?: string[];
+  slotNames?: string[];
+  slotCategories?: string[];
+  slotLevels?: number[];
+  slotActivity?: number[];
+  activeStep?: number;
+  stepProgress?: number;
+  bpm?: number;
+  styleEnergy?: number;
+  styleId?: string;
+  activePreset?: string;
+  transport?: string;
+  masterLevel?: number;
 }
 
 export interface ControlCommand {

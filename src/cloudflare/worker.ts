@@ -434,6 +434,31 @@ export class ShowRoomDurableObject {
       return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
     };
     return {
+      type: "mixer.audioFrame",
+      sourceId: source.sourceId,
+      deviceId: source.deviceId,
+      displayName: source.displayName,
+      timestamp: source.timestamp,
+      level: source.level,
+      rms: source.rms,
+      peak: source.peak,
+      gain: source.gain,
+      muted: source.muted,
+      speaking: source.speaking,
+      frequencyBands: bands,
+      activeStep: source.activeStep,
+      stepProgress: source.stepProgress,
+      bpm: source.bpm,
+      styleEnergy: source.styleEnergy,
+      styleId: source.styleId,
+      activePreset: source.activePreset,
+      transport: source.transport,
+      masterLevel: source.masterLevel,
+      slotLevels: source.slotLevels,
+      slotActivity: source.slotActivity,
+      slotIds: source.slotIds,
+      slotNames: source.slotNames,
+      slotCategories: source.slotCategories,
       volume: source.level,
       subBass: avg(0, 0),
       bass: avg(1, 2),
@@ -701,8 +726,27 @@ function normalizeAudioFrame(input: unknown): AudioFrame {
     gain: clampUnit(input.gain, 0.72),
     muted: Boolean(input.muted),
     speaking: typeof input.speaking === "boolean" ? input.speaking : level > 0.22,
-    frequencyBands: Array.isArray(input.frequencyBands) ? input.frequencyBands.slice(0, 32).map((value) => clampUnit(value)) : []
+    frequencyBands: Array.isArray(input.frequencyBands) ? input.frequencyBands.slice(0, 32).map((value) => clampUnit(value)) : [],
+    slotIds: normalizeStringList(input.slotIds),
+    slotNames: normalizeStringList(input.slotNames),
+    slotCategories: normalizeStringList(input.slotCategories),
+    slotLevels: Array.isArray(input.slotLevels) ? input.slotLevels.slice(0, 32).map((value) => clampUnit(value)) : [],
+    slotActivity: Array.isArray(input.slotActivity) ? input.slotActivity.slice(0, 32).map((value) => clampUnit(value)) : [],
+    activeStep: typeof input.activeStep === "number" ? input.activeStep : undefined,
+    stepProgress: clampUnit(input.stepProgress),
+    bpm: typeof input.bpm === "number" ? input.bpm : undefined,
+    styleEnergy: clampUnit(input.styleEnergy),
+    styleId: typeof input.styleId === "string" ? input.styleId : "",
+    activePreset: typeof input.activePreset === "string" ? input.activePreset : "",
+    transport: typeof input.transport === "string" ? input.transport : "",
+    masterLevel: clampUnit(input.masterLevel, level)
   };
+}
+
+function normalizeStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => typeof entry === "string" ? entry : "").filter(Boolean)
+    : [];
 }
 
 function appendEvent(state: PerformanceState, type: string, module: string | undefined, source: string | undefined, message: string, payload?: unknown) {

@@ -211,6 +211,12 @@ function makeAudioSource(
   };
 }
 
+function normalizeStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => typeof entry === "string" ? entry : "").filter(Boolean)
+    : [];
+}
+
 export function hydrateState(snapshot: unknown): PerformanceState {
   if (!snapshot || typeof snapshot !== "object") return createDefaultState();
   return normalizePerformanceState(mergePatch(createDefaultState() as unknown as JsonRecord, snapshot as JsonRecord) as unknown as PerformanceState);
@@ -239,7 +245,20 @@ export function normalizeAudioFrame(input: unknown): AudioFrame {
     gain: clampUnit(record.gain, 0.72),
     muted: Boolean(record.muted),
     speaking: typeof record.speaking === "boolean" ? record.speaking : level > 0.22,
-    frequencyBands: normalizeBands(record.frequencyBands)
+    frequencyBands: normalizeBands(record.frequencyBands),
+    slotIds: normalizeStringList(record.slotIds),
+    slotNames: normalizeStringList(record.slotNames),
+    slotCategories: normalizeStringList(record.slotCategories),
+    slotLevels: normalizeBands(record.slotLevels),
+    slotActivity: normalizeBands(record.slotActivity),
+    activeStep: typeof record.activeStep === "number" ? record.activeStep : undefined,
+    stepProgress: clampUnit(record.stepProgress),
+    bpm: typeof record.bpm === "number" ? record.bpm : undefined,
+    styleEnergy: clampUnit(record.styleEnergy),
+    styleId: typeof record.styleId === "string" ? record.styleId : "",
+    activePreset: typeof record.activePreset === "string" ? record.activePreset : "",
+    transport: typeof record.transport === "string" ? record.transport : "",
+    masterLevel: clampUnit(record.masterLevel, level)
   };
 }
 
