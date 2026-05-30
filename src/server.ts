@@ -1,5 +1,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,24 @@ import { AudioFrame, ClientHelloMessage, ControlCommand, JsonRecord, ModuleName,
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const SHOW_CONTROL_PORT = 4300;
 const defaultSnapshotPath = () => process.env.SHOW_STATE_PATH || path.join(process.cwd(), "data", "show-state.json");
+
+export function loadLocalEnvFile(envPath = path.join(process.cwd(), ".env"), target: NodeJS.ProcessEnv = process.env) {
+  if (!fs.existsSync(envPath)) return 0;
+  const content = fs.readFileSync(envPath, "utf8");
+  let loaded = 0;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    if (target[key] !== undefined) continue;
+    const value = rawValue.trim().replace(/^(['"])(.*)\1$/, "$2");
+    target[key] = value;
+    loaded += 1;
+  }
+  return loaded;
+}
 
 function getLanAddresses(port: number) {
   const addresses = new Set<string>();
@@ -641,6 +660,7 @@ function isRecord(value: unknown): value is JsonRecord {
 }
 
 async function start() {
+  loadLocalEnvFile();
   const isProduction = process.env.NODE_ENV === "production";
   const { app, server } = createAppServer({
     snapshotPath: defaultSnapshotPath(),

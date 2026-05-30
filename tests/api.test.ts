@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type http from "node:http";
 import WebSocket from "ws";
-import { createServer, type CreateServerOptions } from "../src/server.js";
+import { createServer, loadLocalEnvFile, type CreateServerOptions } from "../src/server.js";
 
 async function withServer(fn: (baseUrl: string, server: http.Server) => Promise<void>, options: CreateServerOptions = {}) {
   const autoAuth = options.controlToken === undefined;
@@ -583,6 +583,25 @@ test("enforces CONTROL_TOKEN when configured", async () => {
     });
     assert.equal(accepted.status, 202);
   }, { controlToken: "secret" });
+});
+
+test("loads local .env values without overriding existing env", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "vad-env-"));
+  const envPath = path.join(dir, ".env");
+  await fs.writeFile(envPath, [
+    "# local show-control env",
+    "CONTROL_TOKEN=local-secret",
+    "VITE_CONTROL_TOKEN=client-secret",
+    "EXISTING_TOKEN=from-file"
+  ].join("\n"));
+
+  const target: NodeJS.ProcessEnv = { EXISTING_TOKEN: "already-set" };
+  const loaded = loadLocalEnvFile(envPath, target);
+
+  assert.equal(loaded, 2);
+  assert.equal(target.CONTROL_TOKEN, "local-secret");
+  assert.equal(target.VITE_CONTROL_TOKEN, "client-secret");
+  assert.equal(target.EXISTING_TOKEN, "already-set");
 });
 
 test("websocket sends snapshots, presence, state patches, and control acknowledgements", async () => {

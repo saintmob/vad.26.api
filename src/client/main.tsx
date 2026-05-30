@@ -955,8 +955,9 @@ function App() {
   const show = snapshot.show;
   const clients = Object.values(snapshot.clients);
   const liveClients = clients.filter((client) => isLiveClient(client, statusNow));
+  const liveDeviceClients = liveClients.filter((client) => client.module !== "dashboard");
   const routeClientsByScreenId = new Map<string, Array<PerformanceState["clients"][string]>>();
-  for (const client of liveClients) {
+  for (const client of liveDeviceClients) {
     if (!client.screenId) continue;
     const screenId = normalizeScreenOccupancyId(client.screenId);
     if (!screenId) continue;
@@ -964,7 +965,7 @@ function App() {
     current.push(client);
     routeClientsByScreenId.set(screenId, current);
   }
-  const unassignedClients = liveClients.filter((client) => !client.screenId);
+  const unassignedClients = liveDeviceClients.filter((client) => !client.screenId);
   const audioSources = Object.values(snapshot.audioSources).sort((a, b) => b.level - a.level);
   const activeSource = snapshot.audioSources[snapshot.modules.audio.activeSourceId] || audioSources[0];
   const screenTopology = normalizeScreenTopology(snapshot.modules.interaction.screenTopology);
@@ -983,9 +984,10 @@ function App() {
         : ui.fireworkStates.standby;
   const routeScreenIds = screenTopology.flatMap((row) => row).filter(Boolean);
   const routeCount = routeScreenIds.length;
-  const clientCount = liveClients.length;
+  const clientCount = liveDeviceClients.length;
   const eventCount = snapshot.eventLog.length;
-  const visibleEventLog = eventLogExpanded ? snapshot.eventLog : snapshot.eventLog.slice(0, 6);
+  const collapsedEventLogLimit = 4;
+  const visibleEventLog = eventLogExpanded ? snapshot.eventLog : snapshot.eventLog.slice(0, collapsedEventLogLimit);
   const summarizeClientIds = (items: Array<{ id: string }>, emptyLabel: string) => {
     if (items.length === 0) return emptyLabel;
     const clientIds = items.map((item) => item.id);
@@ -1436,7 +1438,7 @@ function App() {
                         <p>{ui.interaction.eventLog}</p>
                       </div>
                       <div className="rail-log__head-actions">
-                        {snapshot.eventLog.length > 6 && (
+                        {snapshot.eventLog.length > collapsedEventLogLimit && (
                           <button
                             type="button"
                             className="rail-log__toggle"
