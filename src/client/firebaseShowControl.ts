@@ -32,7 +32,7 @@ const visualScenePresets: Record<string, string> = {
   Cyber: "Cyberpunk"
 };
 
-export const firebaseShowId = env.VITE_SHOW_ID || "show-main";
+export const firebaseShowId = resolveShowId();
 
 export const isFirebaseRealtimeConfigured = Boolean(databaseUrl);
 
@@ -73,6 +73,20 @@ function resolveScreenOrigin(owner: ScreenOwner) {
   if (configured) return String(configured).replace(/\/$/, "");
   if (isLanRuntime()) return resolveOrigin(owner === "vj" ? 4302 : 4303);
   return owner === "vj" ? hostedVjScreenOrigin : hostedBaofaScreenOrigin;
+}
+
+function resolveShowId() {
+  if (typeof window === "undefined") return String(env.VITE_SHOW_ID || "show-main");
+  const params = new URLSearchParams(window.location.search);
+  const fromUrl = String(params.get("room") || params.get("showId") || "").trim();
+  return fromUrl || String(env.VITE_SHOW_ID || "show-main");
+}
+
+function appendRoomParam(url: string) {
+  if (!firebaseShowId || firebaseShowId === "show-main") return url;
+  const next = new URL(url);
+  next.searchParams.set("room", firebaseShowId);
+  return next.toString();
 }
 
 const screenIds = [
@@ -401,9 +415,9 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
     screenId,
     owner,
     url: owner === "vj"
-      ? `${resolveScreenOrigin(owner)}/screen/${encodeURIComponent(screenId)}`
+      ? appendRoomParam(`${resolveScreenOrigin(owner)}/screen/${encodeURIComponent(screenId)}`)
       : owner === "baofa"
-        ? `${resolveScreenOrigin(owner)}/screen/${encodeURIComponent(screenId)}`
+        ? appendRoomParam(`${resolveScreenOrigin(owner)}/screen/${encodeURIComponent(screenId)}`)
         : null,
     updatedAt,
     source

@@ -87,6 +87,20 @@ test("uses hosted module origins for public screen routes", async () => {
   }, { loadSnapshot: false });
 });
 
+test("preserves room query in public screen routes", async () => {
+  await withServer(async (baseUrl) => {
+    const state = await fetch(`${baseUrl}/api/state?room=wan-0531-main`, {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "vad-26-api.vercel.app"
+      }
+    }).then((res) => res.json());
+
+    assert.equal(state.modules.interaction.screenRoutes.A1.url, "https://doit-pearl.vercel.app/screen/A1?room=wan-0531-main");
+    assert.equal(state.modules.interaction.screenRoutes.B1.url, "https://baofa.vercel.app/screen/B1?room=wan-0531-main");
+  }, { loadSnapshot: false });
+});
+
 test("updates screen route preset and individual screen owners", async () => {
   await withServer(async (baseUrl) => {
     const presetResponse = await fetch(`${baseUrl}/api/control`, {

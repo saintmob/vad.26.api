@@ -692,7 +692,7 @@ function App() {
 
     async function boot() {
       try {
-        const state = await fetchJson<PerformanceState>("/api/state");
+        const state = await fetchJson<PerformanceState>(withRoom("/api/state"));
         if (!closed) setSnapshot(state);
         if (shouldUseFirebaseRealtime()) {
           firebaseClient = createFirebaseDashboardClient({
@@ -730,7 +730,7 @@ function App() {
       if (closed) return;
       setConnection("connecting");
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+      socket = new WebSocket(`${protocol}://${window.location.host}${withRoom("/ws")}`);
       socket.addEventListener("open", () => {
         setConnection("connected");
         socket?.send(JSON.stringify({
@@ -774,7 +774,7 @@ function App() {
     if (!token.trim()) throw new Error("Control token is required");
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (token) headers["x-control-token"] = token;
-    const response = await fetch(url, {
+    const response = await fetch(withRoom(url), {
       method: "POST",
       headers,
       body: JSON.stringify(body)
@@ -1790,7 +1790,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
 
     async function boot() {
       try {
-        const state = await fetchJson<PerformanceState>("/api/state");
+        const state = await fetchJson<PerformanceState>(withRoom("/api/state"));
         if (!closed) setSnapshot(state);
       } catch {
         if (!closed) {
@@ -1805,7 +1805,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
       if (closed) return;
       setConnection("connecting");
       const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+      socket = new WebSocket(`${protocol}://${window.location.host}${withRoom("/ws")}`);
       socket.addEventListener("open", () => {
         setConnection("connected");
         socket?.send(JSON.stringify({
@@ -1984,6 +1984,19 @@ async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
   return response.json() as Promise<T>;
+}
+
+function currentRoom() {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("room") || new URLSearchParams(window.location.search).get("showId") || "";
+}
+
+function withRoom(path: string) {
+  const room = currentRoom().trim();
+  if (!room) return path;
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set("room", room);
+  return `${url.pathname}${url.search}`;
 }
 
 function formatMs(value: number) {

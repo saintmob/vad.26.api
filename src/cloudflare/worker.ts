@@ -254,8 +254,10 @@ export class ShowRoomDurableObject {
   }
 
   private getStateForRequest(request: Request) {
-    const origin = request.headers.get("x-public-origin") || new URL(request.url).origin;
-    return resolveStateRoutes(this.requireState(), origin, this.env);
+    const url = new URL(request.url);
+    const origin = request.headers.get("x-public-origin") || url.origin;
+    const room = url.searchParams.get("room") || url.searchParams.get("showId") || request.headers.get("x-show-id");
+    return resolveStateRoutes(this.requireState(), origin, this.env, room);
   }
 
   private requireState() {
@@ -654,10 +656,10 @@ function isScreenGatewayProfile(profile: ConnectionState) {
   return profile.role === "screen-gateway" || profile.capabilities.has("screen.route");
 }
 
-function resolveStateRoutes(state: PerformanceState, origin: string, env: Env): PerformanceState {
-  const routes = makeScreenRoutes(state.modules.interaction.screenRoutePreset, Date.now(), origin, env);
+function resolveStateRoutes(state: PerformanceState, origin: string, env: Env, room?: string | null): PerformanceState {
+  const routes = makeScreenRoutes(state.modules.interaction.screenRoutePreset, Date.now(), origin, env, room);
   for (const [screenId, route] of Object.entries(state.modules.interaction.screenRoutes)) {
-    routes[screenId] = makeScreenRoute(screenId, route.owner, route.updatedAt, route.source || "state", origin, env);
+    routes[screenId] = makeScreenRoute(screenId, route.owner, route.updatedAt, route.source || "state", origin, env, room);
   }
   return {
     ...state,
@@ -671,23 +673,28 @@ function resolveStateRoutes(state: PerformanceState, origin: string, env: Env): 
   };
 }
 
-function makeScreenRoutes(preset: ScreenRoutePreset, updatedAt: number, origin: string, env: Env) {
+function makeScreenRoutes(preset: ScreenRoutePreset, updatedAt: number, origin: string, env: Env, room?: string | null) {
   return Object.fromEntries(SCREEN_IDS.map((screenId) => [
     screenId,
-    makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, "preset", origin, env)
+    makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, "preset", origin, env, room)
   ]));
 }
 
-function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source: string, origin: string, env: Env) {
+function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source: string, origin: string, env: Env, room?: string | null) {
   const vjOrigin = env.VJ_SCREEN_ORIGIN || origin || HOSTED_VJ_SCREEN_ORIGIN;
   const baofaOrigin = env.BAOFA_SCREEN_ORIGIN || origin || HOSTED_BAOFA_SCREEN_ORIGIN;
+  const makeUrl = (routeOrigin: string) => {
+    const url = new URL(`${routeOrigin.replace(/\/$/, "")}/screen/${encodeURIComponent(screenId)}`);
+    if (room) url.searchParams.set("room", room);
+    return url.toString();
+  };
   return {
     screenId,
     owner,
     url: owner === "vj"
-      ? `${vjOrigin.replace(/\/$/, "")}/screen/${encodeURIComponent(screenId)}`
+      ? makeUrl(vjOrigin)
       : owner === "baofa"
-        ? `${baofaOrigin.replace(/\/$/, "")}/screen/${encodeURIComponent(screenId)}`
+        ? makeUrl(baofaOrigin)
         : null,
     updatedAt,
     source

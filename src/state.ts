@@ -785,7 +785,7 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
   };
 }
 
-export function resolveScreenRouteUrl(origin: string | null | undefined, owner: ScreenOwner, screenId: string) {
+export function resolveScreenRouteUrl(origin: string | null | undefined, owner: ScreenOwner, screenId: string, room?: string | null) {
   if (owner !== "vj" && owner !== "baofa") return null;
   const normalizedOrigin = normalizeScreenRouteOrigin(origin);
   const configuredOwnerOrigin = owner === "vj" ? CONFIGURED_VJ_SCREEN_ORIGIN : CONFIGURED_BAOFA_SCREEN_ORIGIN;
@@ -794,6 +794,7 @@ export function resolveScreenRouteUrl(origin: string | null | undefined, owner: 
   const url = new URL(routeOrigin);
   url.pathname = `/screen/${encodeURIComponent(screenId)}`;
   url.search = "";
+  if (room) url.searchParams.set("room", room);
   url.hash = "";
   return url.toString().replace(/\/$/, "");
 }
@@ -815,7 +816,7 @@ function isLanRouteOrigin(origin: { host: string }) {
   );
 }
 
-export function resolveStateScreenRoutes(state: PerformanceState, origin: string | null | undefined): PerformanceState {
+export function resolveStateScreenRoutes(state: PerformanceState, origin: string | null | undefined, room?: string | null): PerformanceState {
   const screenRoutes: Record<string, ScreenRouteEntry> = {};
   for (const [screenId, route] of Object.entries(state.modules.interaction.screenRoutes || {})) {
     const owner = normalizeScreenOwner(route?.owner) || "off";
@@ -823,7 +824,7 @@ export function resolveStateScreenRoutes(state: PerformanceState, origin: string
       ...route,
       screenId,
       owner,
-      url: resolveScreenRouteUrl(origin, owner, screenId),
+      url: resolveScreenRouteUrl(origin, owner, screenId, room),
       updatedAt: positiveNumber(route?.updatedAt, Date.now())
     };
   }
