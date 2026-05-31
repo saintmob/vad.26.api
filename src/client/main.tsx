@@ -144,6 +144,8 @@ const env = (import.meta as unknown as { env: Record<string, string | undefined>
 const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
 const configuredShowBackendUrl = String(env.VITE_SHOW_BACKEND_URL || "").trim().replace(/\/$/, "");
 const configuredShowWsUrl = String(env.VITE_SHOW_WS_URL || "").trim().replace(/\/$/, "");
+const hostedShowBackendUrl = "https://vad-26-show-control.saintmob.workers.dev";
+const hostedShowWsUrl = "wss://vad-26-show-control.saintmob.workers.dev/ws";
 const CLIENT_ONLINE_STALE_MS = 120_000;
 const MIN_PENDING_ACTION_MS = 180;
 const storageKeys = {
@@ -1987,18 +1989,35 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 function apiUrl(path: string) {
-  return withRoom(configuredShowBackendUrl ? `${configuredShowBackendUrl}${path}` : path);
+  const backendUrl = configuredShowBackendUrl || (isPublicRuntime() ? hostedShowBackendUrl : "");
+  return withRoom(backendUrl ? `${backendUrl}${path}` : path);
 }
 
 function webSocketUrl(path: string) {
   if (configuredShowWsUrl) return withRoom(configuredShowWsUrl);
-  if (configuredShowBackendUrl) {
-    const url = new URL(path, configuredShowBackendUrl);
+  const backendUrl = configuredShowBackendUrl || (isPublicRuntime() ? hostedShowBackendUrl : "");
+  if (backendUrl) {
+    const url = new URL(path, backendUrl);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return withRoom(url.toString());
   }
+  if (isPublicRuntime()) return withRoom(hostedShowWsUrl);
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   return withRoom(`${protocol}://${window.location.host}${path}`);
+}
+
+function isPublicRuntime() {
+  if (typeof window === "undefined") return false;
+  const host = window.location.hostname.toLowerCase();
+  return !(
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".local") ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  );
 }
 
 function currentRoom() {
