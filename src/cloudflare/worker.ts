@@ -498,12 +498,9 @@ export class ShowRoomDurableObject {
     const profile = this.profiles.get(socket);
     if (!profile || profile.module !== "audio") return false;
     const configuredDj = this.env.PRIMARY_DJ_CLIENT_ID || "";
-    if (configuredDj) return profile.id === configuredDj;
-    const activeDj = Object.values(this.requireState().clients).find((client) =>
-      client.module === "audio" &&
-      client.status === "online" &&
-      (client.role === "dj" || client.capabilities.includes("mixer.audioFrame"))
-    );
+    const activeAudioClients = Object.values(this.requireState().clients).filter(isActiveAudioPublisher);
+    if (configuredDj && activeAudioClients.some((client) => client.id === configuredDj)) return profile.id === configuredDj;
+    const activeDj = activeAudioClients[0];
     return !activeDj || activeDj.id === profile.id;
   }
 
@@ -512,6 +509,12 @@ export class ShowRoomDurableObject {
     if (!configuredDj) return true;
     return request.headers.get("x-dj-client-id") === configuredDj || new URL(request.url).searchParams.get("djClientId") === configuredDj;
   }
+}
+
+function isActiveAudioPublisher(client: ClientInfo) {
+  return client.module === "audio" &&
+    client.status === "online" &&
+    (client.role === "dj" || client.capabilities.includes("mixer.audioFrame"));
 }
 
 function applyCommand(state: PerformanceState, command: ControlCommand, env: Env) {
