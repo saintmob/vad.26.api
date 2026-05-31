@@ -19,6 +19,18 @@ const databaseUrl = String(env.VITE_FIREBASE_DATABASE_URL || "").replace(/\/$/, 
 const lanHost = String(env.VITE_LAN_HOST || env.SHOW_LAN_HOST || "").trim();
 const hostedVjScreenOrigin = "https://doit-pearl.vercel.app";
 const hostedBaofaScreenOrigin = "https://baofa.vercel.app";
+const visualScenePresets: Record<string, string> = {
+  "Layered Stage": "Layered Stage",
+  Purple: "Purple",
+  "Blue Font": "Blue Font",
+  Pulse: "Neon Pulse",
+  Liquid: "Liquid Dream",
+  Topology: "Sonic Topology",
+  Chromaflux: "Chromaflux",
+  Dumbar: "Dumbar Base",
+  Void: "Dark Space",
+  Cyber: "Cyberpunk"
+};
 
 export const firebaseShowId = env.VITE_SHOW_ID || "show-main";
 
@@ -267,7 +279,11 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
   }
 
   if (command.module === "visual" || command.module === "video") {
-    if (command.command === "setScene") patch["modules/visual/scene"] = String(value || command.target);
+    if (command.command === "setScene") {
+      const scene = String(value || command.target);
+      patch["modules/visual/scene"] = scene;
+      if (visualScenePresets[scene]) patch["modules/visual/preset"] = visualScenePresets[scene];
+    }
     if (command.command === "setPreset") patch["modules/visual/preset"] = String(value || command.target);
     if (command.command === "setText") patch["modules/visual/text/value"] = String(value || "");
     if (command.command === "setAudioDrive") patch["modules/visual/audioDriveMode"] = String(value || "mic");
@@ -301,9 +317,26 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
     if (command.command === "setIntensity" && typeof value === "number") patch["modules/interaction/intensity"] = clampUnit(value);
     if (command.command === "resetTree") {
       patch["modules/interaction/treeGrowth"] = 0;
+      patch["modules/interaction/treePhase"] = "idle";
       patch["modules/interaction/gestureActive"] = false;
       patch["modules/interaction/mode"] = "idle";
+      patch["modules/interaction/visualMode"] = "tree";
+      patch["modules/interaction/fireworkState"] = "standby";
       patch["modules/interaction/intensity"] = 0.08;
+      patch["modules/interaction/evolution"] = 0;
+      patch["modules/interaction/lastInteraction"] = null;
+      patch["modules/interaction/screenPulse"] = null;
+    }
+    if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
+      patch["modules/interaction/visualMode"] = String(value);
+    }
+    if (command.command === "setFireworkState") {
+      patch["modules/interaction/fireworkState"] = String(value || "standby");
+      patch["modules/interaction/visualMode"] = "firework";
+    }
+    if (command.command === "setBaofaFishState") {
+      const fishState = String(value) === "running" ? "running" : "idle";
+      patch["modules/interaction/baofaFishState"] = fishState;
     }
     if (command.command === "pulseScreen") {
       patch["modules/interaction/screenPulse"] = { source: String(value || command.target), timestamp: now };

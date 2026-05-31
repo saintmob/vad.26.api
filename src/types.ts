@@ -165,8 +165,11 @@ export interface InteractionModuleState {
   mode: "idle" | "interaction" | "flow" | "climax";
   visualMode: "tree" | "firework";
   fireworkState: "standby" | "launching" | "resetting";
+  baofaFishState: "idle" | "running";
   intensity: number;
+  evolution: number;
   treeGrowth: number;
+  treePhase: "idle" | "growing" | "bright" | "fading";
   gestureActive: boolean;
   lastInteraction: ScreenPoint | null;
   screenPulse: null | { source: string; timestamp: number };

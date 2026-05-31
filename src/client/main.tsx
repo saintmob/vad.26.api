@@ -178,7 +178,18 @@ const tabDefinitions: Array<{
 ];
 
 const interactionModes = ["idle", "interaction", "flow", "climax"];
-const visualScenes = ["Dumbar", "Topology", "Liquid", "Chromaflux", "Blue Font", "Cyber", "Pulse", "Void"];
+const visualScenes = [
+  { id: "Layered Stage", label: "Live Layered Stage", preset: "Layered Stage" },
+  { id: "Purple", label: "Purple", preset: "Purple" },
+  { id: "Blue Font", label: "Blue Font", preset: "Blue Font" },
+  { id: "Pulse", label: "Neon Pulse", preset: "Neon Pulse" },
+  { id: "Liquid", label: "Liquid Dream", preset: "Liquid Dream" },
+  { id: "Topology", label: "Sonic Topology", preset: "Sonic Topology" },
+  { id: "Chromaflux", label: "Chromaflux", preset: "Chromaflux" },
+  { id: "Dumbar", label: "Grey Glass Blocks", preset: "Dumbar Base" },
+  { id: "Void", label: "Dark Space", preset: "Dark Space" },
+  { id: "Cyber", label: "Cyberpunk", preset: "Cyberpunk" }
+];
 const visualTextStyles = ["Cinematic", "Massive", "Glitch", "Hologram", "Floating", "Beat"];
 const visualAudioDrives: Array<PerformanceState["modules"]["visual"]["audioDriveMode"]> = ["mic", "music", "api"];
 const audioPresets = ["Neon Loop", "Warehouse", "Dream Pop", "Break Lab", "EDM Festival", "Echo Bass"];
@@ -976,6 +987,7 @@ function App() {
     showMenu: false
   };
   const fireworkState = snapshot.modules.interaction.fireworkState || "standby";
+  const baofaFishState = snapshot.modules.interaction.baofaFishState || "idle";
   const fireworkStateLabel =
     fireworkState === "launching"
       ? ui.fireworkStates.launching
@@ -1171,49 +1183,68 @@ function App() {
                           <div className="action-group">
                             <span className="action-label">Tree Control: <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong></span>
                             <div className="action-buttons">
-                            {["idle", "flow", "interaction", "climax"].map((mode) => (
-                              <button
-                                key={mode}
-                                type="button"
-                                className={actionButtonClass("interaction", "setMode", sequenceGroups.length === 0 ? "interaction-mode" : "sequence", snapshot.modules.interaction.mode === mode)}
-                                onClick={() => triggerInteractionMode(mode)}
-                              >
-                                {ui.interactionModes[mode]}
+                              {["idle", "flow", "interaction", "climax"].map((mode) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  className={actionButtonClass("interaction", "setMode", sequenceGroups.length === 0 ? "interaction-mode" : "sequence", snapshot.modules.interaction.mode === mode)}
+                                  onClick={() => triggerInteractionMode(mode)}
+                                >
+                                  {ui.interactionModes[mode]}
+                                </button>
+                              ))}
+                              <button type="button" className={actionButtonClass("interaction", "setMode", "interaction-mode", false, "reset-btn")} onClick={() => { clearSequence(); void sendControl("interaction", "setMode", "interaction-mode", "idle"); }}>
+                                Reset
                               </button>
-                            ))}
-                            <button type="button" className={actionButtonClass("interaction", "setMode", "interaction-mode", false, "reset-btn")} onClick={() => { clearSequence(); void sendControl("interaction", "setMode", "interaction-mode", "idle"); }}>
-                              Reset
-                            </button>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="action-group">
-                          <span className="action-label">Fireworks: <strong>{fireworkStateLabel}</strong></span>
-                          <div className="action-buttons">
-                            <button
-                              type="button"
-                              className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "standby")}
-                              onClick={standbyFireworks}
-                            >
-                              Standby
-                            </button>
-                            <button
-                              type="button"
-                              className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "launching")}
-                              onClick={launchFireworks}
-                            >
-                              Launch
-                            </button>
-                            <button
-                              type="button"
-                              className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "resetting")}
-                              onClick={resetFireworks}
-                            >
-                              Reset
+                        ) : (
+                          <div className="action-group">
+                            <span className="action-label">Fireworks: <strong>{fireworkStateLabel}</strong></span>
+                            <div className="action-buttons">
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "standby")}
+                                onClick={standbyFireworks}
+                              >
+                                Standby
+                              </button>
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "launching")}
+                                onClick={launchFireworks}
+                              >
+                                Launch
+                              </button>
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "resetting")}
+                                onClick={resetFireworks}
+                              >
+                                Reset
                               </button>
                             </div>
                           </div>
                         )}
+                        <div className="action-group">
+                          <span className="action-label">Fish: <strong>{baofaFishState === "running" ? "RUNNING" : "IDLE"}</strong></span>
+                          <div className="action-buttons">
+                            <button
+                              type="button"
+                              className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "idle")}
+                              onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle")}
+                            >
+                              IDLE
+                            </button>
+                            <button
+                              type="button"
+                              className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "running")}
+                              onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "running")}
+                            >
+                              Fish Run
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1495,12 +1526,13 @@ function App() {
               <div className="button-row">
                 {visualScenes.map((scene) => (
                   <button
-                    key={scene}
+                    key={scene.id}
                     type="button"
-                    className={actionButtonClass("visual", "setScene", "visual-main", snapshot.modules.visual.scene === scene)}
-                    onClick={() => sendControl("visual", "setScene", "visual-main", scene)}
+                    className={actionButtonClass("visual", "setScene", "visual-main", snapshot.modules.visual.scene === scene.id)}
+                    title={scene.preset}
+                    onClick={() => sendControl("visual", "setScene", "visual-main", scene.id)}
                   >
-                    {scene}
+                    {scene.label}
                   </button>
                 ))}
               </div>

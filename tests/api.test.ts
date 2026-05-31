@@ -482,6 +482,51 @@ test("applies baofa visual mode controls", async () => {
     assert.equal(modeResponse.status, 202);
     assert.equal(modeBody.state.modules.interaction.mode, "flow");
     assert.equal(modeBody.state.modules.interaction.visualMode, "tree");
+
+    const fireworkModeResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "visual-mode",
+        command: "setVisualMode",
+        value: "firework"
+      })
+    });
+    assert.equal(fireworkModeResponse.status, 202);
+
+    const fishResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "baofa-fish",
+        command: "setBaofaFishState",
+        value: "running"
+      })
+    });
+    const fishBody = await fishResponse.json();
+    assert.equal(fishResponse.status, 202);
+    assert.equal(fishBody.state.modules.interaction.baofaFishState, "running");
+    assert.equal(fishBody.state.modules.interaction.mode, "flow");
+    assert.equal(fishBody.state.modules.interaction.visualMode, "firework");
+    assert.equal(fishBody.state.modules.interaction.intensity, 0.08);
+
+    const resetResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "tree-reset",
+        command: "resetTree",
+        value: true
+      })
+    });
+    const resetBody = await resetResponse.json();
+    assert.equal(resetResponse.status, 202);
+    assert.equal(resetBody.state.modules.interaction.treeGrowth, 0);
+    assert.equal(resetBody.state.modules.interaction.treePhase, "idle");
+    assert.equal(resetBody.state.modules.interaction.baofaFishState, "running");
   });
 });
 

@@ -39,6 +39,18 @@ const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
+const VISUAL_SCENE_PRESETS: Record<string, string> = {
+  "Layered Stage": "Layered Stage",
+  Purple: "Purple",
+  "Blue Font": "Blue Font",
+  Pulse: "Neon Pulse",
+  Liquid: "Liquid Dream",
+  Topology: "Sonic Topology",
+  Chromaflux: "Chromaflux",
+  Dumbar: "Dumbar Base",
+  Void: "Dark Space",
+  Cyber: "Cyberpunk"
+};
 const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
   const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
   return origin ? `${origin.protocol}//${origin.host}` : null;
@@ -115,7 +127,7 @@ export function createDefaultState(now = Date.now()): PerformanceState {
       visual: {
         status: "online",
         scene: "Cyber",
-        preset: "Neon Pulse",
+        preset: "Cyberpunk",
         colors: {
           base: "#00f3ff",
           secondary: "#bf00ff",
@@ -179,8 +191,11 @@ function createDefaultInteractionModule(): InteractionModuleState {
     mode: "idle",
     visualMode: "tree",
     fireworkState: "standby",
+    baofaFishState: "idle",
     intensity: 0.08,
+    evolution: 0,
     treeGrowth: 0,
+    treePhase: "idle",
     gestureActive: false,
     lastInteraction: null,
     screenPulse: null
@@ -302,6 +317,7 @@ function inferModule(command: string): ControlCommand["module"] {
     "resetTree",
     "setVisualMode",
     "setFireworkState",
+    "setBaofaFishState",
     "pulseScreen",
     "setScreen",
     "setScreenOwner",
@@ -525,7 +541,10 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.modules.visual.scene = String(value || command.target);
       state.modules.visual.preset = "Focused";
     }
-    if (command.command === "setScene") state.modules.visual.scene = String(value || command.target);
+    if (command.command === "setScene") {
+      state.modules.visual.scene = String(value || command.target);
+      state.modules.visual.preset = VISUAL_SCENE_PRESETS[state.modules.visual.scene] || state.modules.visual.preset;
+    }
     if (command.command === "setPreset") state.modules.visual.preset = String(value || command.target);
     if (command.command === "setText") {
       if (isRecord(value)) mergePatch(state.modules.visual.text as unknown as JsonRecord, value);
@@ -557,9 +576,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value, state.modules.interaction.intensity);
     if (command.command === "resetTree") {
       state.modules.interaction.treeGrowth = 0;
+      state.modules.interaction.treePhase = "idle";
       state.modules.interaction.gestureActive = false;
       state.modules.interaction.mode = "idle";
+      state.modules.interaction.visualMode = "tree";
+      state.modules.interaction.fireworkState = "standby";
       state.modules.interaction.intensity = 0.08;
+      state.modules.interaction.evolution = 0;
+      state.modules.interaction.lastInteraction = null;
+      state.modules.interaction.screenPulse = null;
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as InteractionModuleState["visualMode"];
@@ -568,6 +593,10 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       const nextFireworkState = normalizeFireworkState(value);
       state.modules.interaction.fireworkState = nextFireworkState;
       state.modules.interaction.visualMode = "firework";
+    }
+    if (command.command === "setBaofaFishState") {
+      const nextFishState = normalizeBaofaFishState(value);
+      state.modules.interaction.baofaFishState = nextFishState;
     }
     if (command.command === "pulseScreen") {
       state.modules.interaction.screenPulse = { source: String(value || command.target), timestamp: Date.now() };
@@ -638,6 +667,9 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
     ? state.modules.interaction.visualMode
     : "tree";
   state.modules.interaction.fireworkState = normalizeFireworkState(state.modules.interaction.fireworkState);
+  state.modules.interaction.baofaFishState = normalizeBaofaFishState(state.modules.interaction.baofaFishState);
+  state.modules.interaction.treePhase = normalizeTreePhase(state.modules.interaction.treePhase);
+  state.modules.interaction.evolution = clampUnit(state.modules.interaction.evolution);
   if (state.modules.interaction.fireworkState !== "standby") {
     state.modules.interaction.visualMode = "firework";
   }
@@ -700,6 +732,14 @@ function normalizeScreenPresentation(value: unknown): InteractionModuleState["sc
 
 function normalizeFireworkState(value: unknown) {
   return ["standby", "launching", "resetting"].includes(String(value)) ? String(value) as InteractionModuleState["fireworkState"] : "standby";
+}
+
+function normalizeBaofaFishState(value: unknown) {
+  return String(value) === "running" ? "running" as const : "idle" as const;
+}
+
+function normalizeTreePhase(value: unknown) {
+  return ["idle", "growing", "bright", "fading"].includes(String(value)) ? String(value) as InteractionModuleState["treePhase"] : "idle";
 }
 
 function isLoopbackOrigin(origin: unknown) {

@@ -335,8 +335,11 @@ export class ShowRoomDurableObject {
           mode: "idle",
           visualMode: "tree",
           fireworkState: "standby",
+          baofaFishState: "idle",
           intensity: 0.08,
+          evolution: 0,
           treeGrowth: 0,
+          treePhase: "idle",
           gestureActive: false,
           lastInteraction: null,
           screenPulse: null
@@ -553,9 +556,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
     if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value);
     if (command.command === "resetTree") {
       state.modules.interaction.treeGrowth = 0;
+      state.modules.interaction.treePhase = "idle";
       state.modules.interaction.gestureActive = false;
       state.modules.interaction.mode = "idle";
+      state.modules.interaction.visualMode = "tree";
+      state.modules.interaction.fireworkState = "standby";
       state.modules.interaction.intensity = 0.08;
+      state.modules.interaction.evolution = 0;
+      state.modules.interaction.lastInteraction = null;
+      state.modules.interaction.screenPulse = null;
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as PerformanceState["modules"]["interaction"]["visualMode"];
@@ -563,6 +572,10 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
     if (command.command === "setFireworkState" && ["standby", "launching", "resetting"].includes(String(value))) {
       state.modules.interaction.fireworkState = String(value) as PerformanceState["modules"]["interaction"]["fireworkState"];
       state.modules.interaction.visualMode = "firework";
+    }
+    if (command.command === "setBaofaFishState") {
+      const fishState = String(value) === "running" ? "running" : "idle";
+      state.modules.interaction.baofaFishState = fishState;
     }
     if (command.command === "pulseScreen") state.modules.interaction.screenPulse = { source: String(value || command.target), timestamp: Date.now() };
     if (command.command === "setScreen") {
@@ -706,7 +719,7 @@ function normalizeControlCommand(input: unknown): ControlCommand {
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx", "focusVideo"].includes(command)) return "visual";
-  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenPresentation"].includes(command)) return "interaction";
+  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenPresentation"].includes(command)) return "interaction";
   return "show";
 }
 

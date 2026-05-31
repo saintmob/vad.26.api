@@ -578,13 +578,20 @@ function pickInteractionControlPatch(command: ControlCommand, state: Performance
     return {
       mode: interaction.mode,
       intensity: interaction.intensity,
+      evolution: interaction.evolution,
       treeGrowth: interaction.treeGrowth,
+      treePhase: interaction.treePhase,
       gestureActive: interaction.gestureActive,
-      visualMode: interaction.visualMode
+      visualMode: interaction.visualMode,
+      fireworkState: interaction.fireworkState,
+      baofaFishState: interaction.baofaFishState,
+      lastInteraction: interaction.lastInteraction,
+      screenPulse: interaction.screenPulse
     };
   }
-  if (command.command === "setVisualMode") return { visualMode: interaction.visualMode };
+  if (command.command === "setVisualMode") return { visualMode: interaction.visualMode, mode: interaction.mode, baofaFishState: interaction.baofaFishState };
   if (command.command === "setFireworkState") return { fireworkState: interaction.fireworkState, visualMode: interaction.visualMode };
+  if (command.command === "setBaofaFishState") return { baofaFishState: interaction.baofaFishState };
   if (command.command === "pulseScreen") return { screenPulse: interaction.screenPulse };
   if (command.command === "setScreen") return { screenId: interaction.screenId, role: interaction.role };
   if (["setScreenOwner", "setScreenRoutePreset"].includes(command.command)) {
