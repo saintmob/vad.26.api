@@ -136,8 +136,7 @@ export class ShowRoomDurableObject {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-    if (this.ctx.acceptWebSocket) this.ctx.acceptWebSocket(server);
-    else (server as WebSocket & { accept: () => void }).accept();
+    (server as WebSocket & { accept: () => void }).accept();
     this.sockets.add(server);
     this.send(server, { type: "state.snapshot", state: this.getStateForRequest(request) });
     server.addEventListener("message", (event) => void this.handleSocketMessage(server, String(event.data), request).catch((error) => {
