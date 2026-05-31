@@ -71,10 +71,22 @@ const VJ_SCREEN_IDS = new Set<string>(["A1"]);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 
+export function resolveWorkerRoomId(url: URL, fallbackShowId?: string | null) {
+  return url.searchParams.get("room") || url.searchParams.get("showId") || fallbackShowId || "show-main";
+}
+
+export function sanitizeWorkerInteractionModulePatch(patch: JsonRecord) {
+  const sanitized = { ...patch };
+  delete sanitized.screenRoutes;
+  delete sanitized.screenRoutePreset;
+  delete sanitized.screenPresentation;
+  return sanitized;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const showId = url.searchParams.get("showId") || env.DEFAULT_SHOW_ID || "show-main";
+    const showId = resolveWorkerRoomId(url, env.DEFAULT_SHOW_ID);
     const stub = env.SHOW_ROOM.getByName(showId);
     const headers = new Headers(request.headers);
     headers.set("x-show-id", showId);
@@ -181,9 +193,9 @@ export class ShowRoomDurableObject {
       const moduleName = String(message.module);
       if (!isModuleName(moduleName)) throw new Error("module.statePatch.module must be audio, visual, or interaction");
       const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
-      this.applyModulePatch(moduleName, patch, String(message.source || this.profiles.get(socket)?.id || "ws"));
+      const sanitizedPatch = this.applyModulePatch(moduleName, patch, String(message.source || this.profiles.get(socket)?.id || "ws"));
       await this.persistState();
-      this.broadcast({ type: "state.patch", module: moduleName, patch, updatedAt: this.requireState().updatedAt });
+      this.broadcast({ type: "state.patch", module: moduleName, patch: sanitizedPatch, updatedAt: this.requireState().updatedAt });
       return;
     }
     if (message.type === "control.command") {
@@ -220,10 +232,10 @@ export class ShowRoomDurableObject {
     if (!isModuleName(moduleName)) return json({ ok: false, error: "module must be audio, visual, or interaction" }, 400);
     const body = await request.json() as JsonRecord;
     const patch = isRecord(body.patch) ? body.patch : body;
-    this.applyModulePatch(moduleName, patch, String(body.source || "rest"));
+    const sanitizedPatch = this.applyModulePatch(moduleName, patch, String(body.source || "rest"));
     await this.persistState();
-    this.broadcast({ type: "state.patch", module: moduleName, patch, updatedAt: this.requireState().updatedAt });
-    return json({ ok: true, module: moduleName, patch, state: this.getStateForRequest(request) }, 202);
+    this.broadcast({ type: "state.patch", module: moduleName, patch: sanitizedPatch, updatedAt: this.requireState().updatedAt });
+    return json({ ok: true, module: moduleName, patch: sanitizedPatch, state: this.getStateForRequest(request) }, 202);
   }
 
   private broadcastControlSync(command: ControlCommand) {
@@ -256,7 +268,7 @@ export class ShowRoomDurableObject {
   private getStateForRequest(request: Request) {
     const url = new URL(request.url);
     const origin = request.headers.get("x-public-origin") || url.origin;
-    const room = url.searchParams.get("room") || url.searchParams.get("showId") || request.headers.get("x-show-id");
+    const room = resolveWorkerRoomId(url, request.headers.get("x-show-id") || this.env.DEFAULT_SHOW_ID);
     return resolveStateRoutes(this.requireState(), origin, this.env, room);
   }
 
@@ -406,18 +418,20 @@ export class ShowRoomDurableObject {
 
   private applyModulePatch(moduleName: ModuleName, patch: JsonRecord, source: string) {
     const state = this.requireState();
-    mergePatch(state.modules[moduleName] as unknown as JsonRecord, patch);
-    if (moduleName === "audio" && typeof patch.bpm === "number") state.show.bpm = positiveNumber(patch.bpm, state.show.bpm);
+    const sanitizedPatch = moduleName === "interaction" ? sanitizeWorkerInteractionModulePatch(patch) : patch;
+    mergePatch(state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
+    if (moduleName === "audio" && typeof sanitizedPatch.bpm === "number") state.show.bpm = positiveNumber(sanitizedPatch.bpm, state.show.bpm);
     if (moduleName === "interaction") {
       const client = state.clients[source];
       if (client) {
-        if (typeof patch.screenId === "string") client.screenId = patch.screenId;
-        if (typeof patch.overview === "boolean") client.overview = patch.overview;
-        if (typeof patch.role === "string") client.role = patch.role;
+        if (typeof sanitizedPatch.screenId === "string") client.screenId = sanitizedPatch.screenId;
+        if (typeof sanitizedPatch.overview === "boolean") client.overview = sanitizedPatch.overview;
+        if (typeof sanitizedPatch.role === "string") client.role = sanitizedPatch.role;
       }
     }
     state.updatedAt = Date.now();
-    if (moduleName !== "audio") appendEvent(state, "module.statePatch", moduleName, source, `${moduleName} state updated`, patch);
+    if (moduleName !== "audio") appendEvent(state, "module.statePatch", moduleName, source, `${moduleName} state updated`, sanitizedPatch);
+    return sanitizedPatch;
   }
 
   private applyControlCommand(command: ControlCommand) {

@@ -6,6 +6,7 @@ import path from "node:path";
 import type http from "node:http";
 import WebSocket from "ws";
 import { createServer, loadLocalEnvFile, type CreateServerOptions } from "../src/server.js";
+import { resolveWorkerRoomId, sanitizeWorkerInteractionModulePatch } from "../src/cloudflare/worker.js";
 
 async function withServer(fn: (baseUrl: string, server: http.Server) => Promise<void>, options: CreateServerOptions = {}) {
   const autoAuth = options.controlToken === undefined;
@@ -141,23 +142,58 @@ test("updates screen route preset and individual screen owners", async () => {
   });
 });
 
-test("ignores screenRoutePreset in interaction module patch and keeps the current route preset", async () => {
+test("ignores route-control fields in interaction module patches", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         source: "dashboard",
-        patch: { screenRoutePreset: "baofa_takeover" }
+        patch: {
+          screenRoutePreset: "baofa_takeover",
+          screenRoutes: {
+            A1: {
+              screenId: "A1",
+              owner: "baofa",
+              url: "https://baofa.example.test/screen/A1",
+              updatedAt: 1,
+              source: "module"
+            }
+          },
+          screenPresentation: { autoRedirect: false, showDebug: false, showMenu: false },
+          mode: "flow"
+        }
       })
     });
     const body = await response.json();
 
     assert.equal(response.status, 202);
+    assert.equal(body.patch.mode, "flow");
+    assert.equal(body.patch.screenRoutePreset, undefined);
+    assert.equal(body.patch.screenRoutes, undefined);
+    assert.equal(body.patch.screenPresentation, undefined);
+    assert.equal(body.state.modules.interaction.mode, "flow");
     assert.equal(body.state.modules.interaction.screenRoutePreset, "balanced");
     assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "vj");
+    assert.equal(body.state.modules.interaction.screenPresentation.autoRedirect, true);
     assert.equal(body.state.modules.interaction.screenRoutes.R2.url, expectedScreenRouteUrl(baseUrl, 4303, "R2"));
   });
+});
+
+test("cloudflare helpers isolate rooms and strip module-owned route controls", () => {
+  assert.equal(resolveWorkerRoomId(new URL("https://worker.example/ws?room=wan-main&showId=legacy"), "default-main"), "wan-main");
+  assert.equal(resolveWorkerRoomId(new URL("https://worker.example/api/state?showId=legacy"), "default-main"), "legacy");
+  assert.equal(resolveWorkerRoomId(new URL("https://worker.example/api/state"), "default-main"), "default-main");
+
+  const sanitized = sanitizeWorkerInteractionModulePatch({
+    screenRoutePreset: "baofa_takeover",
+    screenRoutes: { A1: { owner: "baofa" } },
+    screenPresentation: { autoRedirect: false },
+    mode: "flow",
+    screenId: "B1"
+  });
+
+  assert.deepEqual(sanitized, { mode: "flow", screenId: "B1" });
 });
 
 test("updates screen presentation controls", async () => {

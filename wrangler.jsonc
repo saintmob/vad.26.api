@@ -20,7 +20,7 @@
   "vars": {
     "DEFAULT_SHOW_ID": "show-main",
     "PRIMARY_DJ_CLIENT_ID": "dj-main",
-    "VJ_SCREEN_ORIGIN": "https://vj.example.com",
-    "BAOFA_SCREEN_ORIGIN": "https://baofa.example.com"
+    "VJ_SCREEN_ORIGIN": "https://doit-pearl.vercel.app",
+    "BAOFA_SCREEN_ORIGIN": "https://baofa.vercel.app"
   }
 }

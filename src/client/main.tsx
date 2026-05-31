@@ -142,6 +142,8 @@ type UiCopy = {
 
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env || {};
 const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
+const configuredShowBackendUrl = String(env.VITE_SHOW_BACKEND_URL || "").trim().replace(/\/$/, "");
+const configuredShowWsUrl = String(env.VITE_SHOW_WS_URL || "").trim().replace(/\/$/, "");
 const CLIENT_ONLINE_STALE_MS = 120_000;
 const MIN_PENDING_ACTION_MS = 180;
 const storageKeys = {
@@ -692,7 +694,7 @@ function App() {
 
     async function boot() {
       try {
-        const state = await fetchJson<PerformanceState>(withRoom("/api/state"));
+        const state = await fetchJson<PerformanceState>(apiUrl("/api/state"));
         if (!closed) setSnapshot(state);
         if (shouldUseFirebaseRealtime()) {
           firebaseClient = createFirebaseDashboardClient({
@@ -709,7 +711,7 @@ function App() {
             },
             onError: (message) => {
               if (closed) return;
-              setLastAck(`${message}; falling back to Vercel WebSocket`);
+              setLastAck(`${message}; falling back to WebSocket`);
               if (!firebaseFallbackStarted) {
                 firebaseFallbackStarted = true;
                 void firebaseClient?.close();
@@ -729,8 +731,7 @@ function App() {
     function connect() {
       if (closed) return;
       setConnection("connecting");
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      socket = new WebSocket(`${protocol}://${window.location.host}${withRoom("/ws")}`);
+      socket = new WebSocket(webSocketUrl("/ws"));
       socket.addEventListener("open", () => {
         setConnection("connected");
         socket?.send(JSON.stringify({
@@ -774,7 +775,7 @@ function App() {
     if (!token.trim()) throw new Error("Control token is required");
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (token) headers["x-control-token"] = token;
-    const response = await fetch(withRoom(url), {
+    const response = await fetch(apiUrl(url), {
       method: "POST",
       headers,
       body: JSON.stringify(body)
@@ -1790,7 +1791,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
 
     async function boot() {
       try {
-        const state = await fetchJson<PerformanceState>(withRoom("/api/state"));
+        const state = await fetchJson<PerformanceState>(apiUrl("/api/state"));
         if (!closed) setSnapshot(state);
       } catch {
         if (!closed) {
@@ -1804,8 +1805,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
     function connect() {
       if (closed) return;
       setConnection("connecting");
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      socket = new WebSocket(`${protocol}://${window.location.host}${withRoom("/ws")}`);
+      socket = new WebSocket(webSocketUrl("/ws"));
       socket.addEventListener("open", () => {
         setConnection("connected");
         socket?.send(JSON.stringify({
@@ -1986,6 +1986,21 @@ async function fetchJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function apiUrl(path: string) {
+  return withRoom(configuredShowBackendUrl ? `${configuredShowBackendUrl}${path}` : path);
+}
+
+function webSocketUrl(path: string) {
+  if (configuredShowWsUrl) return withRoom(configuredShowWsUrl);
+  if (configuredShowBackendUrl) {
+    const url = new URL(path, configuredShowBackendUrl);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return withRoom(url.toString());
+  }
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return withRoom(`${protocol}://${window.location.host}${path}`);
+}
+
 function currentRoom() {
   if (typeof window === "undefined") return "";
   return new URLSearchParams(window.location.search).get("room") || new URLSearchParams(window.location.search).get("showId") || "";
@@ -1994,9 +2009,10 @@ function currentRoom() {
 function withRoom(path: string) {
   const room = currentRoom().trim();
   if (!room) return path;
+  const absolute = /^[a-z][a-z\d+.-]*:\/\//i.test(path);
   const url = new URL(path, window.location.origin);
   url.searchParams.set("room", room);
-  return `${url.pathname}${url.search}`;
+  return absolute ? url.toString() : `${url.pathname}${url.search}`;
 }
 
 function formatMs(value: number) {

@@ -906,7 +906,7 @@ function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
   return ["balanced", "vj_takeover", "baofa_takeover"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
 }
 
-function sanitizeInteractionModulePatch(patch: JsonRecord) {
+export function sanitizeInteractionModulePatch(patch: JsonRecord) {
   const sanitized = { ...patch };
   delete sanitized.screenRoutes;
   delete sanitized.screenRoutePreset;

@@ -16,6 +16,7 @@ import {
   normalizeControlCommand,
   resolveStateScreenPresentation,
   resolveStateScreenRoutes,
+  sanitizeInteractionModulePatch,
   ShowStateStore
 } from "./state.js";
 import { AudioFrame, ClientHelloMessage, ControlCommand, JsonRecord, ModuleName, PerformanceState } from "./types.js";
@@ -275,14 +276,15 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
       return;
     }
     const patch = isRecord(req.body.patch) ? req.body.patch : req.body;
+    const sanitizedPatch = moduleName === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
     if (!store.canApplyModulePatch(moduleName, String(req.body.source || "rest"))) {
       res.status(423).json({ ok: false, error: "Operation lock active", state: store.getState() });
       return;
     }
     store.applyModulePatch(moduleName, patch, String(req.body.source || "rest"));
     snapshotWriter?.schedule(store.getState());
-    broadcastSyncMessage(hub, socketProfiles, { type: "state.patch", module: moduleName, patch, updatedAt: store.getState().updatedAt });
-    res.status(202).json({ ok: true, module: moduleName, patch, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
+    broadcastSyncMessage(hub, socketProfiles, { type: "state.patch", module: moduleName, patch: sanitizedPatch, updatedAt: store.getState().updatedAt });
+    res.status(202).json({ ok: true, module: moduleName, patch: sanitizedPatch, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
   });
 
   app.post("/api/control", requireToken(options), (req, res) => {
@@ -446,9 +448,10 @@ function attachWebSocket(
           return;
         }
         const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
+        const sanitizedPatch = message.module === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
         store.applyModulePatch(message.module, patch, String(message.source || clientId || "ws"));
         snapshotWriter?.schedule(store.getState());
-        broadcastSyncMessage(hub, socketProfiles, { type: "state.patch", module: message.module, patch, updatedAt: store.getState().updatedAt });
+        broadcastSyncMessage(hub, socketProfiles, { type: "state.patch", module: message.module, patch: sanitizedPatch, updatedAt: store.getState().updatedAt });
         return;
       }
 
