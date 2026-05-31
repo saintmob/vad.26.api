@@ -686,19 +686,11 @@ function App() {
     let firebaseClient: ReturnType<typeof createFirebaseDashboardClient> | null = null;
     let firebaseFallbackStarted = false;
 
-    if (!token.trim()) {
-      setConnection("offline");
-      setLastAck("Control token is required");
-      return () => {
-        closed = true;
-      };
-    }
-
     async function boot() {
       try {
         const state = await fetchJson<PerformanceState>(apiUrl("/api/state"));
         if (!closed) setSnapshot(state);
-        if (shouldUseFirebaseRealtime()) {
+        if (shouldUseFirebaseRealtime() && token.trim()) {
           firebaseClient = createFirebaseDashboardClient({
             initialState: state,
             token,
@@ -724,6 +716,7 @@ function App() {
           firebaseClientRef.current = firebaseClient;
           return;
         }
+        if (!token.trim() && !closed) setLastAck("Control token is required for write actions");
       } catch {
         if (!closed) setConnection("offline");
       }

@@ -37,9 +37,16 @@ export const firebaseShowId = resolveShowId();
 export const isFirebaseRealtimeConfigured = Boolean(databaseUrl);
 
 export function shouldUseFirebaseRealtime() {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const requestedTransport = params.get("transport");
+    if (requestedTransport === "firebase") return true;
+    if (requestedTransport === "cloudflare" || requestedTransport === "websocket") return false;
+    if (isPublicRuntime()) return false;
+  }
   const transport = env.VITE_SHOW_TRANSPORT || "auto";
   if (transport === "firebase") return true;
-  if (transport === "websocket") return false;
+  if (transport === "websocket" || transport === "cloudflare") return false;
   return isFirebaseRealtimeConfigured && window.location.hostname.endsWith("vercel.app");
 }
 
@@ -66,6 +73,10 @@ function isLanRuntime() {
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
   );
+}
+
+function isPublicRuntime() {
+  return !isLanRuntime();
 }
 
 function resolveScreenOrigin(owner: ScreenOwner) {
