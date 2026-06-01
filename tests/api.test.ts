@@ -142,6 +142,48 @@ test("updates screen route preset and individual screen owners", async () => {
   });
 });
 
+test("applies external route presets and switches back to local modules", async () => {
+  await withServer(async (baseUrl) => {
+    const checkinResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "checkin",
+        command: "setScreenRoutePreset",
+        value: "checkin",
+        issuedBy: "test"
+      })
+    });
+    const checkinBody = await checkinResponse.json();
+
+    assert.equal(checkinResponse.status, 202);
+    assert.equal(checkinBody.state.modules.interaction.screenRoutePreset, "checkin");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.owner, "external");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.url, "https://sign-rho-azure.vercel.app/");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.owner, "external");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.url, "https://sign-rho-azure.vercel.app/");
+
+    const baofaResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "baofa_takeover",
+        command: "setScreenRoutePreset",
+        value: "baofa_takeover",
+        issuedBy: "test"
+      })
+    });
+    const baofaBody = await baofaResponse.json();
+
+    assert.equal(baofaResponse.status, 202);
+    assert.equal(baofaBody.state.modules.interaction.screenRoutePreset, "baofa_takeover");
+    assert.equal(baofaBody.state.modules.interaction.screenRoutes.A1.owner, "baofa");
+    assert.equal(baofaBody.state.modules.interaction.screenRoutes.A1.url, expectedScreenRouteUrl(baseUrl, 4303, "A1"));
+  }, { loadSnapshot: false });
+});
+
 test("saves, applies, and deletes user screen route arrangements", async () => {
   await withServer(async (baseUrl) => {
     const saveResponse = await fetch(`${baseUrl}/api/control`, {
@@ -369,6 +411,44 @@ test("serves audio summary for the active source", async () => {
   }, { loadSnapshot: false });
 });
 
+test("accepts DJ style and shuffle commands", async () => {
+  await withServer(async (baseUrl) => {
+    const styleResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "audio",
+        target: "audio-style",
+        command: "setStyle",
+        value: "techno",
+        issuedBy: "test"
+      })
+    });
+    const styleBody = await styleResponse.json();
+
+    assert.equal(styleResponse.status, 202);
+    assert.equal(styleBody.state.modules.audio.activeStyleId, "techno");
+    assert.equal(styleBody.state.commandLog[0].command, "setStyle");
+
+    const shuffleResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "audio",
+        target: "audio-shuffle",
+        command: "shuffleStyle",
+        value: true,
+        issuedBy: "test"
+      })
+    });
+    const shuffleBody = await shuffleResponse.json();
+
+    assert.equal(shuffleResponse.status, 202);
+    assert.equal(shuffleBody.state.modules.audio.activeStyleId, "techno");
+    assert.match(shuffleBody.state.modules.audio.activePreset, /Shuffle$/);
+  });
+});
+
 test("accepts legacy mixer frames and updates audio state", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/mixer/frame`, {
@@ -379,7 +459,11 @@ test("accepts legacy mixer frames and updates audio state", async () => {
         sourceId: "mic-teacher",
         displayName: "Teacher Mic",
         level: 0.91,
-        frequencyBands: [0.1, 0.4, 0.8]
+        frequencyBands: [0.1, 0.4, 0.8],
+        styleId: "club",
+        activePreset: "Club Sketch",
+        bpm: 128,
+        transport: "playing"
       })
     });
 
@@ -388,6 +472,10 @@ test("accepts legacy mixer frames and updates audio state", async () => {
     assert.equal(body.state.audioSources["mic-teacher"].level, 0.91);
     assert.equal(body.state.modules.audio.activeSourceId, "mic-teacher");
     assert.equal(body.state.modules.audio.masterLevel, 0.91);
+    assert.equal(body.state.modules.audio.activeStyleId, "club");
+    assert.equal(body.state.modules.audio.activePreset, "Club Sketch");
+    assert.equal(body.state.modules.audio.bpm, 128);
+    assert.equal(body.state.modules.audio.transport, "playing");
   });
 });
 

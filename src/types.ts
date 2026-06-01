@@ -4,8 +4,8 @@ export type ModuleName = (typeof MODULE_NAMES)[number];
 export type ModuleStatus = "offline" | "standby" | "online" | "live" | "error";
 export type ShowStatus = "standby" | "running" | "paused" | "ended";
 export type JsonRecord = Record<string, unknown>;
-export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic";
-export type BuiltInScreenRoutePreset = "balanced" | "vj_takeover" | "baofa_takeover";
+export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic" | "external";
+export type BuiltInScreenRoutePreset = "balanced" | "checkin" | "gallery" | "vj_takeover" | "baofa_takeover" | "echo";
 export type ScreenRoutePreset = BuiltInScreenRoutePreset | string;
 
 export interface AudioFrame {
@@ -114,6 +114,7 @@ export interface AudioModuleState {
   masterLevel: number;
   activeTab: string;
   activePreset: string;
+  activeStyleId: string;
   bpm: number;
   activeSourceId: string;
   slots: Array<{
@@ -186,7 +187,7 @@ export interface InteractionModuleState {
   mode: "idle" | "interaction" | "flow" | "climax";
   visualMode: "tree" | "firework";
   fireworkState: "standby" | "launching" | "resetting";
-  baofaFishState: "idle" | "running";
+  baofaFishState: "idle" | "running" | "roam";
   intensity: number;
   evolution: number;
   treeGrowth: number;

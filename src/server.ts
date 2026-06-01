@@ -573,6 +573,8 @@ function pickAudioControlPatch(command: ControlCommand, state: PerformanceState)
   }
   if (command.command === "setMasterLevel") return { masterLevel: state.modules.audio.masterLevel };
   if (command.command === "setPreset") return { activePreset: state.modules.audio.activePreset };
+  if (command.command === "setStyle") return { activeStyleId: state.modules.audio.activeStyleId };
+  if (command.command === "shuffleStyle") return { activePreset: state.modules.audio.activePreset, activeStyleId: state.modules.audio.activeStyleId };
   if (command.command === "setActiveTab") return { activeTab: state.modules.audio.activeTab };
   return state.modules.audio as unknown as JsonRecord;
 }

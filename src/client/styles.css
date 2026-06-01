@@ -1772,6 +1772,26 @@ input::placeholder {
   border-radius: 8px;
 }
 
+.show-status-pill {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 850;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.show-status-pill--running {
+  border-color: color-mix(in srgb, var(--audio) 45%, var(--border));
+  color: var(--audio);
+  background: color-mix(in srgb, var(--audio) 10%, transparent);
+}
+
 .stage-overlay-tools {
   position: absolute;
   top: 12px;
@@ -1867,7 +1887,7 @@ input::placeholder {
 }
 
 .operator-row-body--vj {
-  grid-template-columns: minmax(150px, 0.65fr) minmax(0, 1.55fr) minmax(230px, 1.15fr);
+  grid-template-columns: minmax(130px, 0.45fr) minmax(0, 1.7fr) minmax(300px, 1.2fr);
 }
 
 .operator-row-body--baofa {
@@ -1889,8 +1909,8 @@ input::placeholder {
 }
 
 .operator-actions--scenes button,
-.operator-actions--presets button {
-  flex: 1 1 118px;
+.operator-actions--styles button {
+  flex: 1 1 92px;
 }
 
 .operator-actions--drive {
@@ -1907,6 +1927,14 @@ input::placeholder {
 
 .operator-actions--engine button {
   flex: 1 1 88px;
+}
+
+.operator-actions--styles .shuffle-btn {
+  flex: 1 1 118px;
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--audio) 40%, var(--border));
+  color: var(--audio);
+  background: color-mix(in srgb, var(--audio) 9%, var(--surface));
 }
 
 .operator-row {
@@ -1954,10 +1982,17 @@ input::placeholder {
   gap: 5px;
 }
 
+.operator-text-form--primary {
+  padding: 5px;
+  border: 1px solid color-mix(in srgb, var(--visual) 42%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--visual) 8%, var(--surface));
+}
+
 .operator-text-form input,
 .operator-text-form select,
 .operator-text-form button {
-  min-height: 28px;
+  min-height: 32px;
   border-radius: 7px;
   font-size: 11px;
 }
@@ -2648,6 +2683,12 @@ input::placeholder {
   border-color: color-mix(in srgb, var(--interaction) 48%, var(--border));
   color: var(--interaction);
   background: color-mix(in srgb, var(--interaction) 10%, transparent);
+}
+
+.route-owner-badge.owner-external {
+  border-color: color-mix(in srgb, var(--brand) 48%, var(--border));
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
 }
 
 .route-table span {

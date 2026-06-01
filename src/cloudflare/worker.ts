@@ -70,6 +70,11 @@ const SCREEN_TOPOLOGY = [
 const VJ_SCREEN_IDS = new Set<string>(["A1"]);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
+const EXTERNAL_SCREEN_ROUTE_PRESETS: Record<string, string> = {
+  checkin: "https://sign-rho-azure.vercel.app/",
+  gallery: "https://333d-main-read.vercel.app/",
+  echo: "https://review-zeta-seven.vercel.app/"
+};
 
 export function resolveWorkerRoomId(url: URL, fallbackShowId?: string | null) {
   return url.searchParams.get("room") || url.searchParams.get("showId") || fallbackShowId || "show-main";
@@ -318,6 +323,7 @@ export class ShowRoomDurableObject {
           masterLevel: 0.42,
           activeTab: "tab-1",
           activePreset: "Neon Loop",
+          activeStyleId: "default",
           bpm: 120,
           activeSourceId: "mic-teacher",
           slots: [],
@@ -412,6 +418,12 @@ export class ShowRoomDurableObject {
     state.audioSources[frame.sourceId] = { ...(state.audioSources[frame.sourceId] || {}), ...frame };
     state.modules.audio.activeSourceId = frame.sourceId;
     state.modules.audio.masterLevel = frame.muted ? 0 : frame.level;
+    if (frame.activePreset) state.modules.audio.activePreset = frame.activePreset;
+    if (frame.styleId) state.modules.audio.activeStyleId = frame.styleId;
+    if (frame.bpm) state.modules.audio.bpm = frame.bpm;
+    if (frame.transport === "playing" || frame.transport === "paused" || frame.transport === "stopped") {
+      state.modules.audio.transport = frame.transport;
+    }
     state.updatedAt = Date.now();
   }
 
@@ -420,6 +432,13 @@ export class ShowRoomDurableObject {
     const sanitizedPatch = moduleName === "interaction" ? sanitizeWorkerInteractionModulePatch(patch) : patch;
     mergePatch(state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
     if (moduleName === "audio" && typeof sanitizedPatch.bpm === "number") state.show.bpm = positiveNumber(sanitizedPatch.bpm, state.show.bpm);
+    if (moduleName === "audio") {
+      if (typeof sanitizedPatch.activeStyleId === "string" && sanitizedPatch.activeStyleId) {
+        state.modules.audio.activeStyleId = sanitizedPatch.activeStyleId;
+      } else if (isRecord(sanitizedPatch.arrangementSummary) && typeof sanitizedPatch.arrangementSummary.styleId === "string" && sanitizedPatch.arrangementSummary.styleId) {
+        state.modules.audio.activeStyleId = sanitizedPatch.arrangementSummary.styleId;
+      }
+    }
     if (moduleName === "interaction") {
       const client = state.clients[source];
       if (client) {
@@ -549,6 +568,8 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
   }
   if (command.module === "audio") {
     if (command.command === "setPreset") state.modules.audio.activePreset = String(value || command.target);
+    if (command.command === "setStyle") state.modules.audio.activeStyleId = String(value || command.target);
+    if (command.command === "shuffleStyle") state.modules.audio.activePreset = `${state.modules.audio.activePreset || "Style"} Shuffle`;
     if (command.command === "setActiveTab") state.modules.audio.activeTab = String(value || command.target);
     if (command.command === "setMasterLevel") state.modules.audio.masterLevel = clampUnit(value);
   }
@@ -598,7 +619,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       state.modules.interaction.visualMode = "firework";
     }
     if (command.command === "setBaofaFishState") {
-      const fishState = String(value) === "running" ? "running" : "idle";
+      const fishState = String(value) === "roam" ? "roam" : String(value) === "running" ? "running" : "idle";
       state.modules.interaction.baofaFishState = fishState;
     }
     if (command.command === "pulseScreen") state.modules.interaction.screenPulse = { source: String(value || command.target), timestamp: Date.now() };
@@ -705,8 +726,22 @@ function resolveStateRoutes(state: PerformanceState, origin: string, env: Env, r
 function makeScreenRoutes(preset: ScreenRoutePreset, updatedAt: number, origin: string, env: Env, room?: string | null) {
   return Object.fromEntries(SCREEN_IDS.map((screenId) => [
     screenId,
-    makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, "preset", origin, env, room)
+    makeScreenRouteForPreset(screenId, preset, updatedAt, "preset", origin, env, room)
   ]));
+}
+
+function makeScreenRouteForPreset(screenId: string, preset: ScreenRoutePreset, updatedAt: number, source: string, origin: string, env: Env, room?: string | null) {
+  const externalUrl = EXTERNAL_SCREEN_ROUTE_PRESETS[String(preset)];
+  if (externalUrl) {
+    return {
+      screenId,
+      owner: "external" as ScreenOwner,
+      url: externalUrl,
+      updatedAt,
+      source
+    };
+  }
+  return makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, source, origin, env, room);
 }
 
 function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source: string, origin: string, env: Env, room?: string | null) {
@@ -753,7 +788,7 @@ function normalizeControlCommand(input: unknown): ControlCommand {
 }
 
 function inferModule(command: string): ControlCommand["module"] {
-  if (["setMute", "setGain", "setMasterLevel", "setPreset", "setActiveTab"].includes(command)) return "audio";
+  if (["setMute", "setGain", "setMasterLevel", "setPreset", "setStyle", "shuffleStyle", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx", "focusVideo"].includes(command)) return "visual";
   if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenPresentation"].includes(command)) return "interaction";
   return "show";
@@ -804,11 +839,11 @@ function appendEvent(state: PerformanceState, type: string, module: string | und
 }
 
 function normalizeScreenOwner(value: unknown): ScreenOwner | null {
-  return ["vj", "baofa", "off", "diagnostic"].includes(String(value)) ? String(value) as ScreenOwner : null;
+  return ["vj", "baofa", "off", "diagnostic", "external"].includes(String(value)) ? String(value) as ScreenOwner : null;
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
-  return ["balanced", "vj_takeover", "baofa_takeover"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
+  return ["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
 }
 
 function mergePatch(target: JsonRecord, patch: JsonRecord) {

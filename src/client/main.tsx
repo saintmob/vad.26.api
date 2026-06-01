@@ -12,6 +12,7 @@ import {
   Save,
   Send,
   Settings2,
+  Shuffle,
   SlidersHorizontal,
   Square,
   Trash2,
@@ -198,7 +199,16 @@ const visualScenes = [
 ];
 const visualTextStyles = ["Cinematic", "Massive", "Glitch", "Hologram", "Floating", "Beat"];
 const visualAudioDrives: Array<PerformanceState["modules"]["visual"]["audioDriveMode"]> = ["mic", "music", "api"];
-const audioPresets = ["Neon Loop", "Warehouse", "Dream Pop", "Break Lab", "EDM Festival", "Echo Bass"];
+const audioStyles = [
+  { id: "default", label: "Clean" },
+  { id: "club", label: "Club" },
+  { id: "techno", label: "Techno" },
+  { id: "synthwave", label: "Synthwave" },
+  { id: "trap", label: "Trap 808" },
+  { id: "chiptune", label: "Chiptune" },
+  { id: "piano", label: "Piano" },
+  { id: "experimental", label: "Experimental" }
+];
 const screenSelectionModes: Array<{ id: ScreenSelectionMode; label: string }> = [
   { id: "solid", label: "实线点选" },
   { id: "dashed", label: "虚线点选" },
@@ -206,9 +216,11 @@ const screenSelectionModes: Array<{ id: ScreenSelectionMode; label: string }> = 
 ];
 const sequenceSteps: SequenceStep[] = ["1/16", "1/8", "1/4", "1/2", "1"];
 const screenRoutePresets: Array<{ value: ScreenRoutePreset; label: string }> = [
-  { value: "balanced", label: "Balanced" },
-  { value: "vj_takeover", label: "VJ Takeover" },
-  { value: "baofa_takeover", label: "Baofa Takeover" }
+  { value: "checkin", label: "1. Check-in" },
+  { value: "gallery", label: "2. Gallery" },
+  { value: "vj_takeover", label: "3. VJ" },
+  { value: "baofa_takeover", label: "4. Baofa" },
+  { value: "echo", label: "5. Echo" }
 ];
 const screenOwners: Array<{ value: ScreenOwner; label: string }> = [
   { value: "vj", label: "VJ" },
@@ -344,14 +356,18 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     },
     screenRoutePresets: {
       balanced: "平衡",
-      vj_takeover: "VJ 接管",
-      baofa_takeover: "Baofa 接管"
+      checkin: "1.签到",
+      gallery: "2.展馆",
+      vj_takeover: "3.VJ",
+      baofa_takeover: "4.baofa",
+      echo: "5.回响"
     },
     screenOwners: {
       vj: "VJ",
       baofa: "Baofa",
       off: "关闭",
       diagnostic: "诊断",
+      external: "外部",
       unset: "未设置"
     },
     interactionModes: {
@@ -493,14 +509,18 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     },
     screenRoutePresets: {
       balanced: "Balanced",
-      vj_takeover: "VJ takeover",
-      baofa_takeover: "Baofa takeover"
+      checkin: "1.Check-in",
+      gallery: "2.Gallery",
+      vj_takeover: "3.VJ",
+      baofa_takeover: "4.Baofa",
+      echo: "5.Echo"
     },
     screenOwners: {
       vj: "VJ",
       baofa: "Baofa",
       off: "Off",
       diagnostic: "Diag",
+      external: "External",
       unset: "Unset"
     },
     interactionModes: {
@@ -1249,17 +1269,26 @@ function App() {
                               <strong>{activeSource?.muted ? ui.actions.mute : activeSource?.speaking ? ui.audio.speaking : showStatusLabel}</strong>
                             </div>
                           </div>
-                          <div className="operator-actions operator-actions--presets">
-                          {audioPresets.map((preset) => (
+                          <div className="operator-actions operator-actions--styles">
+                            {audioStyles.map((style) => (
+                              <button
+                                key={style.id}
+                                type="button"
+                                className={actionButtonClass("audio", "setStyle", "audio-style", (snapshot.modules.audio.activeStyleId || activeSource?.styleId || "default") === style.id)}
+                                onClick={() => sendControl("audio", "setStyle", "audio-style", style.id)}
+                              >
+                                {style.label}
+                              </button>
+                            ))}
                             <button
-                              key={preset}
                               type="button"
-                              className={actionButtonClass("audio", "setPreset", "audio-preset", snapshot.modules.audio.activePreset === preset)}
-                              onClick={() => sendControl("audio", "setPreset", "audio-preset", preset)}
+                              className={actionButtonClass("audio", "shuffleStyle", "audio-shuffle", false, "shuffle-btn")}
+                              onClick={() => sendControl("audio", "shuffleStyle", "audio-shuffle", true)}
+                              title={locale === "zh" ? "随机重组当前 DJ 样式" : "Shuffle current DJ style"}
                             >
-                              {preset}
+                              <Shuffle size={13} />
+                              Shuffle
                             </button>
-                          ))}
                           </div>
                           <div className="dj-source-strip" aria-label={ui.audio.sourceList}>
                             {audioSources.slice(0, 4).map((source) => (
@@ -1303,7 +1332,7 @@ function App() {
                           <div className="operator-group">
                             <span>{ui.visual.scene}</span>
                             <div className="operator-actions operator-actions--scenes">
-                              {visualScenes.slice(0, 6).map((scene) => (
+                              {visualScenes.map((scene) => (
                                 <button
                                   key={scene.id}
                                   type="button"
@@ -1316,7 +1345,7 @@ function App() {
                               ))}
                             </div>
                           </div>
-                          <form className="operator-text-form" onSubmit={(event) => {
+                          <form className="operator-text-form operator-text-form--primary" onSubmit={(event) => {
                             event.preventDefault();
                             void sendControl("visual", "setText", "visual-text", {
                               value: manualText,
@@ -1424,21 +1453,28 @@ function App() {
                             </div>
                           )}
                           <div className="operator-group operator-group--fish">
-                            <span>Fish · {baofaFishState === "running" ? "RUNNING" : "IDLE"}</span>
+                            <span>Fish · {baofaFishState === "roam" ? "ROAM" : baofaFishState === "running" ? "RUNNING" : "IDLE"}</span>
                             <div className="operator-actions operator-actions--status">
                               <button
                                 type="button"
                                 className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "idle")}
                                 onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle")}
                               >
-                                IDLE
+                                Idle
                               </button>
                               <button
                                 type="button"
                                 className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "running")}
                                 onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "running")}
                               >
-                                Fish Run
+                                Run
+                              </button>
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "roam")}
+                                onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "roam")}
+                              >
+                                Roam
                               </button>
                             </div>
                           </div>
@@ -1482,6 +1518,9 @@ function App() {
                         >
                           <Eye size={14} />
                         </button>
+                        <span className={`show-status-pill show-status-pill--${show.status}`}>
+                          {showStatusLabel}
+                        </span>
                         <button
                           type="button"
                           className={actionButtonClass("interaction", "setScreenDebugVisible", "screen-debug", screenPresentation.showDebug)}
@@ -1878,16 +1917,19 @@ function App() {
               </div>
 
               <div className="button-row">
-                {audioPresets.map((preset) => (
+                {audioStyles.map((style) => (
                   <button
-                    key={preset}
+                    key={style.id}
                     type="button"
-                    className={actionButtonClass("audio", "setPreset", "audio-preset", snapshot.modules.audio.activePreset === preset)}
-                    onClick={() => sendControl("audio", "setPreset", "audio-preset", preset)}
+                    className={actionButtonClass("audio", "setStyle", "audio-style", (snapshot.modules.audio.activeStyleId || activeSource?.styleId || "default") === style.id)}
+                    onClick={() => sendControl("audio", "setStyle", "audio-style", style.id)}
                   >
-                    {preset}
+                    {style.label}
                   </button>
                 ))}
+                <button type="button" className={actionButtonClass("audio", "shuffleStyle", "audio-shuffle")} onClick={() => sendControl("audio", "shuffleStyle", "audio-shuffle", true)}>
+                  <Shuffle size={13} /> Shuffle
+                </button>
               </div>
             </Panel>
 
@@ -2113,7 +2155,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
       setMessage(`Manual routing hold for ${formatOwner(route.owner)}`);
       return;
     }
-    if ((route.owner === "vj" || route.owner === "baofa") && routeTargetUrl) {
+    if (routeTargetUrl && route.owner !== "off" && route.owner !== "diagnostic") {
       setMessage(`Routing ${screenId} to ${formatOwner(route.owner)}`);
       window.location.replace(routeTargetUrl);
       return;
@@ -2329,6 +2371,7 @@ function formatMs(value: number) {
 function formatOwner(owner: unknown) {
   if (owner === "vj") return "VJ";
   if (owner === "baofa") return "Baofa";
+  if (owner === "external") return "External";
   if (owner === "off") return "Off";
   if (owner === "diagnostic") return "Diag";
   return "Unset";

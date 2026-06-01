@@ -19,6 +19,11 @@ const databaseUrl = String(env.VITE_FIREBASE_DATABASE_URL || "").replace(/\/$/, 
 const lanHost = String(env.VITE_LAN_HOST || env.SHOW_LAN_HOST || "").trim();
 const hostedVjScreenOrigin = "https://doit-pearl.vercel.app";
 const hostedBaofaScreenOrigin = "https://baofa.vercel.app";
+const externalScreenRoutePresets: Record<string, string> = {
+  checkin: "https://sign-rho-azure.vercel.app/",
+  gallery: "https://333d-main-read.vercel.app/",
+  echo: "https://review-zeta-seven.vercel.app/"
+};
 const visualScenePresets: Record<string, string> = {
   "Video Flow": "Video Flow",
   "Layered Stage": "Layered Stage",
@@ -302,6 +307,8 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
       patch["modules/audio/masterLevel"] = clampUnit(value);
     }
     if (command.command === "setPreset") patch["modules/audio/activePreset"] = String(value || command.target);
+    if (command.command === "setStyle") patch["modules/audio/activeStyleId"] = String(value || command.target);
+    if (command.command === "shuffleStyle") patch["modules/audio/activePreset"] = "Shuffled";
     if (command.command === "setActiveTab") patch["modules/audio/activeTab"] = String(value || command.target);
   }
 
@@ -368,7 +375,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
       patch["modules/interaction/visualMode"] = "firework";
     }
     if (command.command === "setBaofaFishState") {
-      const fishState = String(value) === "running" ? "running" : "idle";
+      const fishState = String(value) === "roam" ? "roam" : String(value) === "running" ? "running" : "idle";
       patch["modules/interaction/baofaFishState"] = fishState;
     }
     if (command.command === "pulseScreen") {
@@ -399,10 +406,10 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
             if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/scene`] = scene;
             if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/enabled`] = true;
           }
-        } else if (["balanced", "vj_takeover", "baofa_takeover"].includes(preset)) {
+        } else if (["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(preset)) {
           patch["modules/interaction/screenRoutePreset"] = preset;
           for (const screenId of screenIds) {
-            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, ownerForPreset(screenId, preset), now, "preset");
+            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRouteForPreset(screenId, preset, now, "preset");
           }
         }
       }
@@ -426,7 +433,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
     }
     if (command.command === "deleteScreenRouteArrangement") {
       const presetId = String(value || command.target || "").trim();
-      if (presetId && !["balanced", "vj_takeover", "baofa_takeover"].includes(presetId)) {
+      if (presetId && !["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(presetId)) {
         const presets = (currentState?.modules.interaction.customScreenRoutePresets || []).filter((entry) => entry.id !== presetId);
         patch["modules/interaction/customScreenRoutePresets"] = presets;
         if (currentState?.modules.interaction.screenRoutePreset === presetId) {
@@ -457,7 +464,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
 }
 
 function normalizeScreenOwner(value: unknown): ScreenOwner | null {
-  return ["vj", "baofa", "off", "diagnostic"].includes(String(value)) ? String(value) as ScreenOwner : null;
+  return ["vj", "baofa", "off", "diagnostic", "external"].includes(String(value)) ? String(value) as ScreenOwner : null;
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
@@ -468,7 +475,7 @@ function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
 function normalizeScreenRouteArrangement(value: unknown, now: number, currentState: PerformanceState | null) {
   if (!isRecord(value)) return null;
   const rawId = String(value.id || "").trim();
-  const id = rawId && !["balanced", "vj_takeover", "baofa_takeover"].includes(rawId)
+  const id = rawId && !["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(rawId)
     ? rawId
     : `custom-${createIdFragment()}`;
   const inputRoutes = isRecord(value.routes) ? value.routes : {};
@@ -521,6 +528,20 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
     updatedAt,
     source
   };
+}
+
+function makeScreenRouteForPreset(screenId: string, preset: ScreenRoutePreset, updatedAt: number, source: string) {
+  const externalUrl = externalScreenRoutePresets[String(preset)];
+  if (externalUrl) {
+    return {
+      screenId,
+      owner: "external" as ScreenOwner,
+      url: externalUrl,
+      updatedAt,
+      source
+    };
+  }
+  return makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, source);
 }
 
 function openStream(path: string, onRemoteChange: () => void | Promise<void>) {
