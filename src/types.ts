@@ -5,7 +5,8 @@ export type ModuleStatus = "offline" | "standby" | "online" | "live" | "error";
 export type ShowStatus = "standby" | "running" | "paused" | "ended";
 export type JsonRecord = Record<string, unknown>;
 export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic";
-export type ScreenRoutePreset = "balanced" | "vj_takeover" | "baofa_takeover";
+export type BuiltInScreenRoutePreset = "balanced" | "vj_takeover" | "baofa_takeover";
+export type ScreenRoutePreset = BuiltInScreenRoutePreset | string;
 
 export interface AudioFrame {
   type: "mixer.audioFrame";
@@ -88,6 +89,24 @@ export interface ScreenRouteEntry {
   source?: string;
 }
 
+export interface VisualScreenState {
+  id: string;
+  name: string;
+  device: "stage" | "projector" | "led" | "tablet" | "phone";
+  scene: string;
+  enabled: boolean;
+}
+
+export interface ScreenRouteArrangementPreset {
+  id: string;
+  name: string;
+  routes: Record<string, ScreenOwner>;
+  vjScenes: Record<string, string>;
+  userDefined: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AudioModuleState {
   status: ModuleStatus;
   projectName: string;
@@ -145,6 +164,7 @@ export interface VisualModuleState {
   audioDriveMode: "mic" | "music" | "api";
   fullscreen: boolean;
   visualMemories: Array<{ id: string; name: string; scene: string }>;
+  visualScreens: VisualScreenState[];
 }
 
 export interface InteractionModuleState {
@@ -153,6 +173,7 @@ export interface InteractionModuleState {
   screenRegistry: ScreenRegistryEntry[];
   screenRoutes: Record<string, ScreenRouteEntry>;
   screenRoutePreset: ScreenRoutePreset;
+  customScreenRoutePresets: ScreenRouteArrangementPreset[];
   screenPresentation: {
     autoRedirect: boolean;
     showDebug: boolean;

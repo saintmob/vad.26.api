@@ -14,6 +14,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Square,
+  Trash2,
   X,
   Type,
   Eye,
@@ -30,6 +31,7 @@ type ScreenSelectionMode = "solid" | "dashed" | "box";
 type SequenceStep = "1/16" | "1/8" | "1/4" | "1/2" | "1";
 type SequenceGroup = { order: number; screenIds: string[] };
 type DragBox = { startX: number; startY: number; currentX: number; currentY: number };
+type RouteDraftEntry = { owner: ScreenOwner; scene: string };
 type DashboardTab = "interaction" | "visual" | "audio";
 type ThemeMode = "system" | "light" | "dark";
 type LanguageMode = "system" | "zh" | "en";
@@ -150,7 +152,6 @@ const CLIENT_ONLINE_STALE_MS = 120_000;
 const MIN_PENDING_ACTION_MS = 180;
 const storageKeys = {
   token: "vad-control-token",
-  tab: "vad-dashboard-tab",
   theme: "vad-theme-mode",
   language: "vad-language-mode"
 } as const;
@@ -183,6 +184,7 @@ const tabDefinitions: Array<{
 
 const interactionModes = ["idle", "interaction", "flow", "climax"];
 const visualScenes = [
+  { id: "Video Flow", label: "Video Flow", preset: "Video Flow" },
   { id: "Layered Stage", label: "Live Layered Stage", preset: "Layered Stage" },
   { id: "Purple", label: "Purple", preset: "Purple" },
   { id: "Blue Font", label: "Blue Font", preset: "Blue Font" },
@@ -211,9 +213,9 @@ const screenRoutePresets: Array<{ value: ScreenRoutePreset; label: string }> = [
 const screenOwners: Array<{ value: ScreenOwner; label: string }> = [
   { value: "vj", label: "VJ" },
   { value: "baofa", label: "Baofa" },
-  { value: "off", label: "Off" },
-  { value: "diagnostic", label: "Diag" }
+  { value: "off", label: "Off" }
 ];
+const routePanelOwners = screenOwners;
 
 const uiCopy: Record<UiLanguage, UiCopy> = {
   zh: {
@@ -559,6 +561,18 @@ function makeActionKey(module: ControlCommand["module"], command: string, target
   return `${module}:${command}:${target}`;
 }
 
+function createRouteDraft(snapshot: PerformanceState): Record<string, RouteDraftEntry> {
+  const screensById = new Map((snapshot.modules.visual.visualScreens || []).map((screen) => [screen.id, screen]));
+  return Object.fromEntries(screenLayoutOrder.map((screenId) => {
+    const route = snapshot.modules.interaction.screenRoutes?.[screenId];
+    const visualScreen = screensById.get(screenId);
+    return [screenId, {
+      owner: route?.owner || "baofa",
+      scene: visualScreen?.scene || "Video Flow"
+    }];
+  }));
+}
+
 function isLiveClient(client: PerformanceState["clients"][string], now: number) {
   if (client.status !== "online") return false;
   const lastSeen = Number(client.lastSeen || client.connectedAt || 0);
@@ -600,8 +614,11 @@ function App() {
   const [sequenceStep, setSequenceStep] = React.useState<SequenceStep>("1/4");
   const [sequenceGroups, setSequenceGroups] = React.useState<SequenceGroup[]>([]);
   const [dragBox, setDragBox] = React.useState<DragBox | null>(null);
-  const [eventLogExpanded, setEventLogExpanded] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<DashboardTab>(() => readStoredValue(storageKeys.tab, "interaction"));
+  const [routeComposerOpen, setRouteComposerOpen] = React.useState(false);
+  const [routeComposerName, setRouteComposerName] = React.useState("");
+  const [routeDraft, setRouteDraft] = React.useState<Record<string, RouteDraftEntry>>({});
+  const [selectedComposerScreenId, setSelectedComposerScreenId] = React.useState("A1");
+  const [activeTab] = React.useState<DashboardTab>("interaction");
   const [themeMode, setThemeMode] = React.useState<ThemeMode>(() => readStoredValue(storageKeys.theme, "system"));
   const [languageMode, setLanguageMode] = React.useState<LanguageMode>(() => readStoredValue(storageKeys.language, "system"));
   const [settingsOpen, setSettingsOpen] = React.useState(false);
@@ -622,10 +639,6 @@ function App() {
   React.useEffect(() => {
     window.localStorage.setItem(storageKeys.token, token);
   }, [token]);
-
-  React.useEffect(() => {
-    window.localStorage.setItem(storageKeys.tab, activeTab);
-  }, [activeTab]);
 
   React.useEffect(() => {
     window.localStorage.setItem(storageKeys.theme, themeMode);
@@ -882,7 +895,68 @@ function App() {
     setDragBox(null);
   }, []);
 
+  const openRouteComposer = React.useCallback(() => {
+    if (!snapshot) return;
+    setRouteDraft(createRouteDraft(snapshot));
+    setRouteComposerName(locale === "zh"
+      ? `编排 ${snapshot.modules.interaction.customScreenRoutePresets.length + 1}`
+      : `Arrangement ${snapshot.modules.interaction.customScreenRoutePresets.length + 1}`);
+    setSelectedComposerScreenId(snapshot.modules.interaction.screenId || "A1");
+    setRouteComposerOpen(true);
+    setScreenSelectionMode("solid");
+    clearSequence();
+  }, [clearSequence, locale, snapshot]);
+
+  const closeRouteComposer = React.useCallback(() => {
+    setRouteComposerOpen(false);
+    setDragBox(null);
+  }, []);
+
+  const setDraftScreenOwner = React.useCallback((screenId: string, owner: ScreenOwner) => {
+    setRouteDraft((current) => ({
+      ...current,
+      [screenId]: {
+        owner,
+        scene: current[screenId]?.scene || "Video Flow"
+      }
+    }));
+  }, []);
+
+  const setDraftScreenScene = React.useCallback((screenId: string, scene: string) => {
+    setRouteDraft((current) => ({
+      ...current,
+      [screenId]: {
+        owner: "vj",
+        scene
+      }
+    }));
+  }, []);
+
+  const saveRouteArrangement = React.useCallback(() => {
+    const routes: Record<string, ScreenOwner> = {};
+    const vjScenes: Record<string, string> = {};
+    for (const screenId of screenLayoutOrder) {
+      const entry = routeDraft[screenId] || { owner: "baofa", scene: "Video Flow" };
+      routes[screenId] = entry.owner;
+      if (entry.owner === "vj") vjScenes[screenId] = entry.scene;
+    }
+    void sendControl("interaction", "saveScreenRouteArrangement", "custom-route", {
+      name: routeComposerName.trim() || (locale === "zh" ? "自定义编排" : "Custom arrangement"),
+      routes,
+      vjScenes
+    });
+    setRouteComposerOpen(false);
+  }, [locale, routeComposerName, routeDraft, sendControl]);
+
+  const deleteRouteArrangement = React.useCallback((presetId: string) => {
+    void sendControl("interaction", "deleteScreenRouteArrangement", presetId, presetId);
+  }, [sendControl]);
+
   const handleScreenSelect = React.useCallback((screenId: string) => {
+    if (routeComposerOpen) {
+      setSelectedComposerScreenId(screenId);
+      return;
+    }
     if (screenSelectionMode === "solid") {
       clearSequence();
       const occupiedClientId = snapshot
@@ -898,7 +972,7 @@ function App() {
     if (screenSelectionMode === "dashed") {
       addSequenceGroup([screenId]);
     }
-  }, [addSequenceGroup, clearSequence, screenSelectionMode, sendControl, snapshot, statusNow]);
+  }, [addSequenceGroup, clearSequence, routeComposerOpen, screenSelectionMode, sendControl, setDraftScreenOwner, snapshot, statusNow]);
 
   const handleBoxPointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (screenSelectionMode !== "box" || event.button !== 0) return;
@@ -992,10 +1066,12 @@ function App() {
         : ui.fireworkStates.standby;
   const routeScreenIds = screenTopology.flatMap((row) => row).filter(Boolean);
   const routeCount = routeScreenIds.length;
+  const customRoutePresets = snapshot.modules.interaction.customScreenRoutePresets || [];
+  const selectedDraft = routeDraft[selectedComposerScreenId] || { owner: "vj" as ScreenOwner, scene: "Video Flow" };
+  const selectedDraftSceneLabel = visualScenes.find((scene) => scene.id === selectedDraft.scene)?.label || selectedDraft.scene;
   const clientCount = liveDeviceClients.length;
-  const eventCount = snapshot.eventLog.length;
-  const collapsedEventLogLimit = 4;
-  const visibleEventLog = eventLogExpanded ? snapshot.eventLog : snapshot.eventLog.slice(0, collapsedEventLogLimit);
+  const headerEventLogLimit = 3;
+  const visibleHeaderEventLog = snapshot.eventLog.slice(0, headerEventLogLimit);
   const summarizeClientIds = (items: Array<{ id: string }>, emptyLabel: string) => {
     if (items.length === 0) return emptyLabel;
     const clientIds = items.map((item) => item.id);
@@ -1014,6 +1090,34 @@ function App() {
         : lastSyncedAt
           ? (locale === "zh" ? `已同步 ${new Date(lastSyncedAt).toLocaleTimeString()}` : `Synced ${new Date(lastSyncedAt).toLocaleTimeString()}`)
           : (locale === "zh" ? "待同步" : "Idle");
+  const workspaceStatusItems = [
+    {
+      key: "devices",
+      icon: <Grid3X3 size={13} />,
+      label: locale === "zh" ? "设备" : "Devices",
+      value: `${clientCount}/${routeCount}`
+    },
+    {
+      key: "connection",
+      icon: <Radio size={13} />,
+      label: ui.app.connection,
+      value: ui.status[connection],
+      state: connection
+    },
+    {
+      key: "sync",
+      icon: <RotateCcw size={13} />,
+      label: locale === "zh" ? "同步" : "Sync",
+      value: syncLabel,
+      state: effectiveSyncStatus === "error" ? "offline" : effectiveSyncStatus === "sending" ? "connecting" : "connected"
+    },
+    {
+      key: "show",
+      icon: <Play size={13} />,
+      label: ui.app.showStatus,
+      value: showStatusLabel
+    }
+  ];
   const actionButtonClass = (
     module: ControlCommand["module"],
     command: string,
@@ -1040,99 +1144,38 @@ function App() {
           </div>
         </div>
 
-        <div className="console-header__rail">
-          <div className="header-summary">
-            <div className="header-metrics" aria-label={locale === "zh" ? "路由与在线设备" : "Routes and online devices"}>
-              <div className="header-metric">
-                <span>{locale === "zh" ? "路由设备" : "Routes"}</span>
-                <strong>{routeCount}</strong>
-              </div>
-              <div className="header-metric">
-                <span>{locale === "zh" ? "在线设备" : "Online"}</span>
-                <strong>{clientCount}</strong>
-              </div>
-            </div>
+        <button
+          type="button"
+          className="settings-trigger"
+          aria-label={ui.layout.systemSettings}
+          onClick={() => setSettingsOpen(true)}
+        >
+          <Settings2 size={16} />
+          <span>{ui.layout.systemSettings}</span>
+        </button>
 
-            <div className="status-stack">
-              <div className="status-chip">
-                <div className={`connection-dot ${connection}`} />
-                <div>
-                  <strong>{ui.app.connection}</strong>
-                  <span>{ui.status[connection]}</span>
-                </div>
-              </div>
-              <div className={`status-chip sync-chip sync-chip--${effectiveSyncStatus}`}>
-                <div className={`connection-dot ${effectiveSyncStatus === "error" ? "offline" : effectiveSyncStatus === "sending" ? "connecting" : "connected"}`} />
-                <div>
-                  <strong>{locale === "zh" ? "数据同步" : "Sync"}</strong>
-                  <span>{syncLabel}</span>
-                </div>
-              </div>
-              <div className="status-chip">
-                <div>
-                  <strong>{ui.app.showStatus}</strong>
-                  <span>{showStatusLabel}</span>
-                </div>
-              </div>
-            </div>
+        <section className="header-log-strip" aria-label={ui.interaction.eventLog}>
+          <div className="header-log-strip__ack">
+            <span>{locale === "zh" ? "回执" : "Ack"}</span>
+            <strong>{latestAck}</strong>
           </div>
-
-          <button
-            type="button"
-            className="settings-trigger"
-            aria-label={ui.layout.systemSettings}
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings2 size={16} />
-            <span>{ui.layout.systemSettings}</span>
-          </button>
-        </div>
-      </header>
-
-      <section className="console-dock">
-        <nav className="tab-strip" aria-label={ui.app.activeTab}>
-          {tabDefinitions.map((tab) => {
-            const tabText = ui.tabs[tab.key];
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                className={activeTab === tab.key ? "tab-button selected" : "tab-button"}
-                style={{ "--accent": tab.accent } as React.CSSProperties}
-                onClick={() => setActiveTab(tab.key)}
-              >
-                {tab.icon}
-                <span>
-                  <strong>{tabText.label}</strong>
-                  <small>{tabText.detail}</small>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <section className="playback-bar" aria-label={ui.layout.transport}>
-          <div className="playback-bar__copy">
-            <p>{ui.layout.transport}</p>
-            <strong>{showStatusLabel}</strong>
-            <span>{show.id} · {show.bpm} BPM · {formatMs(show.positionMs)}</span>
-          </div>
-          <div className="playback-bar__actions">
-            <button type="button" className={actionButtonClass("show", "play", show.id, show.status === "running")} onClick={() => sendControl("show", "play", show.id)}>
-              <Play size={16} /> {ui.actions.play}
-            </button>
-            <button type="button" className={actionButtonClass("show", "pause", show.id, show.status === "paused")} onClick={() => sendControl("show", "pause", show.id)}>
-              <Pause size={16} /> {ui.actions.pause}
-            </button>
-            <button type="button" className={actionButtonClass("show", "stop", show.id, show.status === "ended")} onClick={() => sendControl("show", "stop", show.id)}>
-              <Square size={16} /> {ui.actions.stop}
-            </button>
-            <button type="button" className={actionButtonClass("show", "reset", show.id)} onClick={() => sendControl("show", "reset", show.id)}>
-              <RotateCcw size={16} /> {ui.actions.reset}
-            </button>
+          <div className="header-log-strip__events">
+            {visibleHeaderEventLog.length > 0 ? visibleHeaderEventLog.map((event) => (
+              <article key={event.id}>
+                <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
+                <strong>{event.type}</strong>
+                <p>{event.message}</p>
+              </article>
+            )) : (
+              <article>
+                <span>--:--:--</span>
+                <strong>{ui.interaction.eventLog}</strong>
+                <p>{ui.status.waiting}</p>
+              </article>
+            )}
           </div>
         </section>
-      </section>
+      </header>
 
       <section className="console-body">
         {activeTab !== "interaction" && (
@@ -1151,140 +1194,303 @@ function App() {
               title={ui.interaction.title}
               icon={<MonitorCog size={18} />}
               className="workspace-panel workspace-panel--interaction"
+              headerExtra={(
+                <div className="workspace-status-strip">
+                  {workspaceStatusItems.map((item) => (
+                    <span key={item.key} className="workspace-status-chip">
+                      {item.state && <i className={`connection-dot ${item.state}`} />}
+                      {item.icon}
+                      <small>{item.label}</small>
+                      <strong>{item.value}</strong>
+                    </span>
+                  ))}
+                </div>
+              )}
             >
                 <div className="interaction-layout-core">
-                  <div className="interaction-header-block">
-                    <div className="header-main">
-                      <div className="header-mode-toggle">
-                        <div className="mode-pill-label">Visual Mode: <strong>{snapshot.modules.interaction.visualMode === "firework" ? "FIREWORKS" : "TREE"}</strong></div>
-                        <div className="segmented-control global-mode-switch">
-                          <button
-                            type="button"
-                            className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "tree")}
-                            onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
-                          >
-                            Tree
-                          </button>
-                          <button
-                            type="button"
-                            className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "firework")}
-                            onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
-                          >
-                            Fireworks
-                          </button>
+                    <div className="operator-stack" aria-label={locale === "zh" ? "现场有效操作" : "Live controls"}>
+                      <section className="operator-card operator-card--dj operator-card--row">
+                        <div className="operator-card__head">
+                          <AudioLines size={15} />
+                          <strong>{ui.audio.title}</strong>
+                          <span>4301 · {snapshot.modules.audio.projectName}</span>
                         </div>
-                      </div>
-                      <div className="header-action-bar">
-                        {snapshot.modules.interaction.visualMode === "tree" ? (
-                          <div className="action-group">
-                            <span className="action-label">Tree Control: <strong>{ui.interactionModes[snapshot.modules.interaction.mode]}</strong></span>
-                            <div className="action-buttons">
-                              {["idle", "flow", "interaction", "climax"].map((mode) => (
-                                <button
-                                  key={mode}
-                                  type="button"
-                                  className={actionButtonClass("interaction", "setMode", sequenceGroups.length === 0 ? "interaction-mode" : "sequence", snapshot.modules.interaction.mode === mode)}
-                                  onClick={() => triggerInteractionMode(mode)}
-                                >
-                                  {ui.interactionModes[mode]}
-                                </button>
-                              ))}
-                              <button type="button" className={actionButtonClass("interaction", "setMode", "interaction-mode", false, "reset-btn")} onClick={() => { clearSequence(); void sendControl("interaction", "setMode", "interaction-mode", "idle"); }}>
-                                Reset
-                              </button>
+                        <div className="operator-row-body operator-row-body--dj">
+                          <div className="dj-player-primary" aria-label={ui.layout.transport}>
+                          <button type="button" className={actionButtonClass("show", "play", show.id, show.status === "running")} onClick={() => sendControl("show", "play", show.id)} title={ui.actions.play}>
+                            <Play size={14} />
+                          </button>
+                          <button type="button" className={actionButtonClass("show", "pause", show.id, show.status === "paused")} onClick={() => sendControl("show", "pause", show.id)} title={ui.actions.pause}>
+                            <Pause size={14} />
+                          </button>
+                          <button type="button" className={actionButtonClass("show", "stop", show.id, show.status === "ended")} onClick={() => sendControl("show", "stop", show.id)} title={ui.actions.stop}>
+                            <Square size={14} />
+                          </button>
+                          <button type="button" className={actionButtonClass("show", "reset", show.id)} onClick={() => sendControl("show", "reset", show.id)} title={ui.actions.reset}>
+                            <RotateCcw size={14} />
+                          </button>
+                            <span>{snapshot.modules.audio.bpm} BPM · {snapshot.modules.audio.transport}</span>
+                          </div>
+                          <div className="dj-status-grid" aria-label={locale === "zh" ? "4301 音频状态" : "4301 audio status"}>
+                            <div>
+                              <span>{ui.audio.activeSource}</span>
+                              <strong>{activeSource?.displayName || (locale === "zh" ? "无音源" : "No source")}</strong>
+                            </div>
+                            <div>
+                              <span>{ui.audio.presets}</span>
+                              <strong>{snapshot.modules.audio.activePreset || "--"}</strong>
+                            </div>
+                            <div>
+                              <span>{ui.metrics.master}</span>
+                              <strong>{Math.round(snapshot.modules.audio.masterLevel * 100)}%</strong>
+                            </div>
+                            <div>
+                              <span>{locale === "zh" ? "状态" : "State"}</span>
+                              <strong>{activeSource?.muted ? ui.actions.mute : activeSource?.speaking ? ui.audio.speaking : showStatusLabel}</strong>
                             </div>
                           </div>
-                        ) : (
-                          <div className="action-group">
-                            <span className="action-label">Fireworks: <strong>{fireworkStateLabel}</strong></span>
-                            <div className="action-buttons">
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "standby")}
-                                onClick={standbyFireworks}
-                              >
-                                Standby
-                              </button>
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "launching")}
-                                onClick={launchFireworks}
-                              >
-                                Launch
-                              </button>
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "resetting")}
-                                onClick={resetFireworks}
-                              >
-                                Reset
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                        <div className="action-group">
-                          <span className="action-label">Fish: <strong>{baofaFishState === "running" ? "RUNNING" : "IDLE"}</strong></span>
-                          <div className="action-buttons">
+                          <div className="operator-actions operator-actions--presets">
+                          {audioPresets.map((preset) => (
                             <button
+                              key={preset}
                               type="button"
-                              className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "idle")}
-                              onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle")}
+                              className={actionButtonClass("audio", "setPreset", "audio-preset", snapshot.modules.audio.activePreset === preset)}
+                              onClick={() => sendControl("audio", "setPreset", "audio-preset", preset)}
                             >
-                              IDLE
+                              {preset}
                             </button>
-                            <button
-                              type="button"
-                              className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "running")}
-                              onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "running")}
-                            >
-                              Fish Run
-                            </button>
+                          ))}
                           </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="header-sequence-pill">
-                      {sequenceGroups.length > 0 && (
-                        <div className="seq-pill">
-                          <span className="seq-label">{ui.interaction.step}</span>
-                          <div className="seq-buttons">
-                            {sequenceSteps.map((step) => (
+                          <div className="dj-source-strip" aria-label={ui.audio.sourceList}>
+                            {audioSources.slice(0, 4).map((source) => (
                               <button
-                                key={step}
+                                key={source.sourceId}
                                 type="button"
-                                className={sequenceStep === step ? "selected" : ""}
-                                onClick={() => setSequenceStep(step)}
+                                className={actionButtonClass("audio", "setMute", source.sourceId, source.muted)}
+                                onClick={() => sendControl("audio", "setMute", source.sourceId, !source.muted)}
+                                title={`${source.displayName} · ${Math.round(source.level * 100)}%`}
                               >
-                                {step}
+                                <span>{source.displayName}</span>
+                                <i style={{ width: `${Math.round(source.level * 100)}%` }} />
                               </button>
                             ))}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </section>
 
-                  <div className="screen-stage-container">
-                    <div className="screen-stage-header">
-                      <div className="presentation-toggles">
+                      <section className="operator-card operator-card--vj operator-card--row">
+                        <div className="operator-card__head">
+                          <Aperture size={15} />
+                          <strong>VJ</strong>
+                          <span>{visualScenes.find((scene) => scene.id === snapshot.modules.visual.scene)?.label || snapshot.modules.visual.scene}</span>
+                        </div>
+                        <div className="operator-row-body operator-row-body--vj">
+                          <div className="operator-group operator-group--drive">
+                            <span>{ui.visual.drive}</span>
+                            <div className="operator-actions operator-actions--drive">
+                              {visualAudioDrives.map((drive) => (
+                                <button
+                                  key={drive}
+                                  type="button"
+                                  className={actionButtonClass("visual", "setAudioDrive", "visual-audio-drive", snapshot.modules.visual.audioDriveMode === drive)}
+                                  onClick={() => sendControl("visual", "setAudioDrive", "visual-audio-drive", drive)}
+                                >
+                                  {drive === "api" ? "show api" : drive}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="operator-group">
+                            <span>{ui.visual.scene}</span>
+                            <div className="operator-actions operator-actions--scenes">
+                              {visualScenes.slice(0, 6).map((scene) => (
+                                <button
+                                  key={scene.id}
+                                  type="button"
+                                  className={actionButtonClass("visual", "setScene", "visual-main", snapshot.modules.visual.scene === scene.id)}
+                                  title={scene.preset}
+                                  onClick={() => sendControl("visual", "setScene", "visual-main", scene.id)}
+                                >
+                                  {scene.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <form className="operator-text-form" onSubmit={(event) => {
+                            event.preventDefault();
+                            void sendControl("visual", "setText", "visual-text", {
+                              value: manualText,
+                              animation: snapshot.modules.visual.text.animation,
+                              reactive: snapshot.modules.visual.text.reactive
+                            });
+                          }}>
+                            <select
+                              value={snapshot.modules.visual.text.animation}
+                              onChange={(event) => sendControl("visual", "setText", "visual-text-style", {
+                                value: snapshot.modules.visual.text.value,
+                                animation: event.target.value,
+                                reactive: snapshot.modules.visual.text.reactive
+                              })}
+                            >
+                              {visualTextStyles.map((style) => <option key={style} value={style}>{style}</option>)}
+                            </select>
+                            <input value={manualText} onChange={(event) => setManualText(event.target.value)} />
+                            <button
+                              type="submit"
+                              className={actionButtonClass("visual", "setText", "visual-text")}
+                              title={ui.actions.send}
+                            >
+                              <Send size={14} />
+                            </button>
+                          </form>
+                        </div>
+                      </section>
+
+                      <section className="operator-card operator-card--baofa operator-card--row">
+                        <div className="operator-card__head">
+                          <MonitorCog size={15} />
+                          <strong>Baofa</strong>
+                          <span>4303 · {snapshot.modules.interaction.visualMode === "tree" ? `Tree · ${ui.interactionModes[snapshot.modules.interaction.mode]}` : `Fireworks · ${fireworkStateLabel}`}</span>
+                        </div>
+                        <div className="operator-row-body operator-row-body--baofa">
+                          <div className="operator-group operator-group--engine">
+                            <span>Engine</span>
+                            <div className="operator-actions operator-actions--engine">
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "tree")}
+                                onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
+                              >
+                                Tree
+                              </button>
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "firework")}
+                                onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
+                              >
+                                Fireworks
+                              </button>
+                            </div>
+                          </div>
+                          {snapshot.modules.interaction.visualMode === "tree" ? (
+                            <div className="operator-group operator-group--mode">
+                              <span>Tree · {ui.interactionModes[snapshot.modules.interaction.mode]}</span>
+                              <div className="operator-actions operator-actions--compact">
+                                {["idle", "flow", "interaction", "climax"].map((mode) => (
+                                  <button
+                                    key={mode}
+                                    type="button"
+                                    className={actionButtonClass("interaction", "setMode", sequenceGroups.length === 0 ? "interaction-mode" : "sequence", snapshot.modules.interaction.mode === mode)}
+                                    onClick={() => triggerInteractionMode(mode)}
+                                  >
+                                    {ui.interactionModes[mode]}
+                                  </button>
+                                ))}
+                                <button
+                                  type="button"
+                                  className={actionButtonClass("interaction", "resetTree", "tree-reset", false, "reset-btn")}
+                                  onClick={() => { clearSequence(); void sendControl("interaction", "resetTree", "tree-reset", true); }}
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="operator-group operator-group--mode">
+                              <span>Fireworks · {fireworkStateLabel}</span>
+                              <div className="operator-actions operator-actions--compact">
+                                <button
+                                  type="button"
+                                  className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "standby")}
+                                  onClick={standbyFireworks}
+                                >
+                                  Standby
+                                </button>
+                                <button
+                                  type="button"
+                                  className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "launching")}
+                                  onClick={launchFireworks}
+                                >
+                                  Launch
+                                </button>
+                                <button
+                                  type="button"
+                                  className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "resetting")}
+                                  onClick={resetFireworks}
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          <div className="operator-group operator-group--fish">
+                            <span>Fish · {baofaFishState === "running" ? "RUNNING" : "IDLE"}</span>
+                            <div className="operator-actions operator-actions--status">
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "idle")}
+                                onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle")}
+                              >
+                                IDLE
+                              </button>
+                              <button
+                                type="button"
+                                className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "running")}
+                                onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "running")}
+                              >
+                                Fish Run
+                              </button>
+                            </div>
+                          </div>
+                          {sequenceGroups.length > 0 && (
+                            <div className="seq-pill seq-pill--embedded">
+                              <span className="seq-label">{ui.interaction.step}</span>
+                              <div className="seq-buttons">
+                                {sequenceSteps.map((step) => (
+                                  <button
+                                    key={step}
+                                    type="button"
+                                    className={sequenceStep === step ? "selected" : ""}
+                                    onClick={() => setSequenceStep(step)}
+                                  >
+                                    {step}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    </div>
+
+                    <div className="screen-stage-container">
+                    <div className="screen-stage">
+                      <div className="presentation-toggles presentation-toggles--overlay">
+                        <button
+                          type="button"
+                          className={actionButtonClass("visual", "setFullscreen", "visual-fullscreen", snapshot.modules.visual.fullscreen)}
+                          onClick={() => sendControl("visual", "setFullscreen", "visual-fullscreen", !snapshot.modules.visual.fullscreen)}
+                          title={ui.visual.fullscreen}
+                        >
+                          <Maximize size={14} />
+                        </button>
                         <button
                           type="button"
                           className={actionButtonClass("interaction", "setScreenMenuVisible", "screen-menu", screenPresentation.showMenu)}
                           onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
+                          title={ui.interaction.showMenu}
                         >
-                          <Eye size={14} /> {ui.interaction.showMenu}
+                          <Eye size={14} />
                         </button>
                         <button
                           type="button"
                           className={actionButtonClass("interaction", "setScreenDebugVisible", "screen-debug", screenPresentation.showDebug)}
                           onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
+                          title={ui.interaction.showDebug}
                         >
-                          <Bug size={14} /> {ui.interaction.showDebug}
+                          <Bug size={14} />
                         </button>
                       </div>
-                    </div>
-                    <div className="screen-stage">
                       <div className="stage-overlay-tools">
                         <div className="selection-mode-picker">
                           {screenSelectionModes.map((mode) => {
@@ -1309,6 +1515,7 @@ function App() {
                       </div>
                       <div
                         className={`screen-grid selection-mode-${screenSelectionMode}`}
+                        data-composing={routeComposerOpen ? "true" : "false"}
                         aria-label={ui.interaction.screenMap}
                         ref={screenGridRef}
                         onPointerDown={handleBoxPointerDown}
@@ -1318,8 +1525,11 @@ function App() {
                       >
                         {screenLayoutItems.map((screen) => {
                           const route = screenRoutes[screen.id];
+                          const draft = routeDraft[screen.id];
                           const screenClients = routeClientsByScreenId.get(screen.id) || [];
                           const isScreenOnline = screenClients.length > 0;
+                          const effectiveOwner = routeComposerOpen ? draft?.owner : route?.owner;
+                          const effectiveScene = routeComposerOpen ? draft?.scene : undefined;
                           return (
                             <button
                               key={screen.id}
@@ -1327,19 +1537,20 @@ function App() {
                               data-screen-id={screen.id}
                               className={[
                                 snapshot.modules.interaction.screenId === screen.id ? "selected" : "",
+                                routeComposerOpen && selectedComposerScreenId === screen.id ? "selected composing-selected" : "",
                                 sequenceOrderByScreen.has(screen.id) ? "sequenced" : "",
                                 screen.id === "A1" ? "master-screen" : "",
-                                route?.owner ? `owner-${route.owner}` : "",
+                                effectiveOwner ? `owner-${effectiveOwner}` : "",
                                 isScreenOnline ? "is-online" : "is-offline",
                                 pendingActions.has(makeActionKey("interaction", "setScreen", screen.id)) ? "is-pending" : ""
                               ].filter(Boolean).join(" ")}
                               style={getScreenLayoutStyle(screen)}
                               onClick={() => handleScreenSelect(screen.id)}
-                              title={route?.url || route?.owner || screen.id}
+                              title={routeComposerOpen ? `${screen.id} · ${effectiveScene || ""}` : (route?.url || route?.owner || screen.id)}
                             >
                               <i className="device-dot" aria-label={isScreenOnline ? (locale === "zh" ? "设备在线" : "Device online") : (locale === "zh" ? "设备离线" : "Device offline")} />
                               <strong>{screen.id}</strong>
-                              <span>{ui.screenOwners[route?.owner || "unset"]}</span>
+                              <span>{routeComposerOpen ? (effectiveOwner === "vj" ? effectiveScene : ui.screenOwners[effectiveOwner || "unset"]) : ui.screenOwners[route?.owner || "unset"]}</span>
                               {isScreenOnline && <small>{screenClients.length}</small>}
                               {sequenceOrderByScreen.has(screen.id) && (
                                 <em className="screen-order">{sequenceOrderByScreen.get(screen.id)}</em>
@@ -1349,28 +1560,7 @@ function App() {
                         })}
                         {dragBox && <span className="selection-box" style={dragBoxStyle(dragBox)} />}
                       </div>
-                      <p className="stage-hint stage-hint--overlay">{ui.interaction.routeHint}</p>
                     </div>
-                  </div>
-                  <div className="interaction-readout-row" aria-label={locale === "zh" ? "状态概览" : "Status overview"}>
-                    {[
-                      { key: "intensity", label: ui.interaction.intensity, value: snapshot.modules.interaction.intensity, kind: "percent" },
-                      { key: "treeGrowth", label: ui.interaction.growth, value: snapshot.modules.interaction.treeGrowth, kind: "percent" },
-                      { key: "gestureActive", label: ui.interaction.gesture, value: snapshot.modules.interaction.gestureActive, kind: "boolean" },
-                      { key: "screenRoutePreset", label: ui.interaction.route, value: snapshot.modules.interaction.screenRoutePreset, kind: "route" }
-                    ].map((item, idx) => {
-                      let displayVal = "";
-                      if (item.kind === "percent" && typeof item.value === "number") displayVal = `${Math.round(item.value * 100)}%`;
-                      else if (item.kind === "boolean") displayVal = item.value ? "ACTIVE" : "IDLE";
-                      else if (item.kind === "route") displayVal = ui.screenRoutePresets[item.value as ScreenRoutePreset];
-
-                      return (
-                        <div key={item.key} className="header-stat-pill">
-                          <span className="stat-label">{item.label}</span>
-                          <span className={`stat-value ${idx === 2 && item.value ? "active" : ""}`}>{displayVal}</span>
-                        </div>
-                      );
-                    })}
                   </div>
                 </div>
                 <div className="interaction-controls-footer">
@@ -1382,117 +1572,194 @@ function App() {
               <div className="rail-shell">
                 <div className="rail-header">
                   <div>
-                    <strong>{ui.layout.routes}</strong>
+                    <strong>{routeComposerOpen ? (locale === "zh" ? "VJ 编排" : "VJ arrangement") : ui.layout.routes}</strong>
                   </div>
+                  <button
+                    type="button"
+                    className={routeComposerOpen ? "rail-action selected" : "rail-action"}
+                    onClick={routeComposerOpen ? closeRouteComposer : openRouteComposer}
+                  >
+                    {routeComposerOpen ? <X size={14} /> : <SlidersHorizontal size={14} />}
+                    <span>{routeComposerOpen ? (locale === "zh" ? "退出" : "Exit") : (locale === "zh" ? "编排" : "Arrange")}</span>
+                  </button>
                 </div>
 
                 <div className="rail-stack rail-stack--right">
-                  <section className="route-board">
-                    <div className="route-board__head">
-                      <div>
-                        <p>{ui.interaction.routeRegister}</p>
-                        <strong>{ui.interaction.routePreset}</strong>
-                      </div>
-                      <span>{routeCount}</span>
-                    </div>
+                  <section className={routeComposerOpen ? "route-board route-board--composer-mode" : "route-board"}>
+                    {routeComposerOpen ? (
+                      <>
+                        <div className="route-board__head route-board__head--composer">
+                          <div>
+                            <p>{locale === "zh" ? "当前设备" : "Selected screen"}</p>
+                            <strong>{selectedComposerScreenId} · {selectedDraft.owner === "vj" ? selectedDraftSceneLabel : ui.screenOwners[selectedDraft.owner]}</strong>
+                            {selectedDraft.owner === "vj" && <em>{selectedDraft.scene}</em>}
+                          </div>
+                        </div>
 
-                    <div className="route-presets-rail">
-                      <span className="rail-label">{ui.interaction.routePreset}</span>
-                      <div className="route-presets">
-                        {screenRoutePresets.map((preset) => (
-                          <button
-                            key={preset.value}
-                            type="button"
-                            className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.value)}
-                            onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
-                          >
-                            {ui.screenRoutePresets[preset.value]}
+                        <div className="composer-form">
+                          <label>
+                            <span>{locale === "zh" ? "方案名" : "Name"}</span>
+                            <input
+                              value={routeComposerName}
+                              onChange={(event) => setRouteComposerName(event.target.value)}
+                              maxLength={40}
+                            />
+                          </label>
+                          <button type="button" className="composer-save" onClick={saveRouteArrangement}>
+                            <Save size={14} /> {ui.actions.save}
                           </button>
-                        ))}
-                      </div>
-                    </div>
+                        </div>
 
-                    <div className="route-table route-table--rail">
-                      {routeScreenIds.map((screenId) => {
-                        const route = screenRoutes[screenId];
-                        const routeClients = routeClientsByScreenId.get(screenId) || [];
-                        const isRouteOnline = routeClients.length > 0;
-                        const clientSummary = summarizeClientIds(
-                          routeClients,
-                          locale === "zh" ? "暂无在线设备" : "No live device"
-                        );
-                        const isSelected = snapshot.modules.interaction.screenId === screenId;
-                        return (
-                          <article key={screenId} className={[isSelected ? "selected" : "", isRouteOnline ? "is-online" : "is-offline"].filter(Boolean).join(" ")}>
-                            <div>
-                              <strong><i className="device-dot" />{screenId}</strong>
-                              <span>{route?.url || "Route URL unavailable"}</span>
-                              <small className="route-meta-line">
-                                {route?.updatedAt ? new Date(route.updatedAt).toLocaleTimeString() : (locale === "zh" ? "等待中" : "Waiting")} · {ui.interaction.clients}: {clientSummary}
-                              </small>
-                            </div>
-                            <div className="owner-switch" aria-label={`${screenId} owner`}>
-                              {screenOwners.map((owner) => (
-                                <button
-                                  key={owner.value}
-                                  type="button"
-                                  className={actionButtonClass("interaction", "setScreenOwner", screenId, route?.owner === owner.value, route?.owner === owner.value ? `owner-${owner.value}` : "")}
-                                  onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
-                                >
-                                  {ui.screenOwners[owner.value]}
-                                </button>
+                        <div className="composer-owner-row">
+                          {(["vj", "baofa", "off"] as ScreenOwner[]).map((owner) => (
+                            <button
+                              key={owner}
+                              type="button"
+                              className={selectedDraft.owner === owner ? "selected" : ""}
+                              onClick={() => setDraftScreenOwner(selectedComposerScreenId, owner)}
+                            >
+                              {ui.screenOwners[owner]}
+                            </button>
+                          ))}
+                        </div>
+
+                        {selectedDraft.owner === "vj" && (
+                          <div className="vj-scene-grid vj-scene-grid--composer">
+                            {visualScenes.map((scene) => (
+                              <button
+                                key={scene.id}
+                                type="button"
+                                className={selectedDraft.scene === scene.id ? "selected" : ""}
+                                onClick={() => setDraftScreenScene(selectedComposerScreenId, scene.id)}
+                              >
+                                <strong>{scene.label}</strong>
+                                <span>{scene.preset}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="route-table route-table--rail route-table--composer">
+                          {routeScreenIds.map((screenId) => {
+                            const draft = routeDraft[screenId] || { owner: "baofa" as ScreenOwner, scene: "Video Flow" };
+                            return (
+                              <article
+                                key={screenId}
+                                className={selectedComposerScreenId === screenId ? "selected" : ""}
+                                onClick={() => setSelectedComposerScreenId(screenId)}
+                              >
+                                <div>
+                                  <strong><i className="device-dot" />{screenId}</strong>
+                                  <span>{draft.owner === "vj" ? draft.scene : ui.screenOwners[draft.owner]}</span>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+
+                        {customRoutePresets.length > 0 && (
+                          <div className="route-presets-rail route-presets-rail--custom">
+                            <span className="rail-label">{locale === "zh" ? "用户预设" : "User presets"}</span>
+                            <div className="custom-preset-list">
+                              {customRoutePresets.map((preset) => (
+                                <div key={preset.id} className="custom-preset-row">
+                                  <button
+                                    type="button"
+                                    className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.id)}
+                                    onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.id)}
+                                  >
+                                    {preset.name}
+                                  </button>
+                                  <button type="button" className="delete-preset" onClick={() => deleteRouteArrangement(preset.id)} title={locale === "zh" ? "删除" : "Delete"}>
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
                               ))}
                             </div>
-                          </article>
-                        );
-                      })}
-
-                      {unassignedClients.length > 0 && (
-                        <article className="route-table__unassigned">
-                          <div>
-                            <strong>{locale === "zh" ? "未绑定" : "Unassigned"}</strong>
-                            <span>{summarizeClientIds(unassignedClients, locale === "zh" ? "暂无在线设备" : "No live device")}</span>
-                            <small>{ui.interaction.clients}</small>
                           </div>
-                        </article>
-                      )}
-                    </div>
-                  </section>
-
-                  <section className="rail-log" aria-label={ui.interaction.eventLog}>
-                    <div className="rail-log__head">
-                      <div>
-                        <p>{ui.interaction.eventLog}</p>
-                      </div>
-                      <div className="rail-log__head-actions">
-                        {snapshot.eventLog.length > collapsedEventLogLimit && (
-                          <button
-                            type="button"
-                            className="rail-log__toggle"
-                            onClick={() => setEventLogExpanded((current) => !current)}
-                          >
-                            {eventLogExpanded ? (locale === "zh" ? "收起" : "Less") : (locale === "zh" ? "更多" : "More")}
-                          </button>
                         )}
-                        <span>{eventCount}</span>
-                      </div>
-                    </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="route-presets-rail">
+                          <div className="route-presets">
+                            {screenRoutePresets.map((preset) => (
+                              <button
+                                key={preset.value}
+                                type="button"
+                                className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.value)}
+                                onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
+                              >
+                                {ui.screenRoutePresets[preset.value]}
+                              </button>
+                            ))}
+                            {customRoutePresets.map((preset) => (
+                              <button
+                                key={preset.id}
+                                type="button"
+                                className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.id)}
+                                onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.id)}
+                              >
+                                {preset.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
 
-                    <div className="rail-log__ack">
-                      <span>{locale === "zh" ? "回执" : "Ack"}</span>
-                      <strong>{latestAck}</strong>
-                    </div>
+                        <div className="route-table route-table--rail">
+                          {routeScreenIds.map((screenId) => {
+                            const route = screenRoutes[screenId];
+                            const routeClients = routeClientsByScreenId.get(screenId) || [];
+                            const isRouteOnline = routeClients.length > 0;
+                            const clientSummary = summarizeClientIds(
+                              routeClients,
+                              locale === "zh" ? "暂无在线设备" : "No live device"
+                            );
+                            const isSelected = snapshot.modules.interaction.screenId === screenId;
+                            return (
+                              <article key={screenId} className={[isSelected ? "selected" : "", isRouteOnline ? "is-online" : "is-offline"].filter(Boolean).join(" ")}>
+                                <div>
+                                  <strong>
+                                    <i className="device-dot" />
+                                    {screenId}
+                                    <em className={`route-owner-badge owner-${route?.owner || "unset"}`}>
+                                      {ui.screenOwners[route?.owner || "unset"]}
+                                    </em>
+                                  </strong>
+                                  <small className="route-meta-line">
+                                    {route?.updatedAt ? new Date(route.updatedAt).toLocaleTimeString() : (locale === "zh" ? "等待中" : "Waiting")} · {ui.interaction.clients}: {clientSummary}
+                                  </small>
+                                </div>
+                                <div className="owner-switch" aria-label={`${screenId} owner`}>
+                                  {routePanelOwners.map((owner) => (
+                                    <button
+                                      key={owner.value}
+                                      type="button"
+                                      className={actionButtonClass("interaction", "setScreenOwner", screenId, route?.owner === owner.value, route?.owner === owner.value ? `owner-${owner.value}` : "")}
+                                      onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
+                                    >
+                                      {ui.screenOwners[owner.value]}
+                                    </button>
+                                  ))}
+                                </div>
+                              </article>
+                            );
+                          })}
 
-                    <div className="event-list event-list--compact rail-log__body">
-                      {visibleEventLog.map((event) => (
-                        <article key={event.id}>
-                          <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                          <strong>{event.type}</strong>
-                          <p>{event.message}</p>
-                        </article>
-                      ))}
-                    </div>
+                          {unassignedClients.length > 0 && (
+                            <article className="route-table__unassigned">
+                              <div>
+                                <strong>{locale === "zh" ? "未绑定" : "Unassigned"}</strong>
+                                <span>{summarizeClientIds(unassignedClients, locale === "zh" ? "暂无在线设备" : "No live device")}</span>
+                                <small>{ui.interaction.clients}</small>
+                              </div>
+                            </article>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </section>
+
                 </div>
               </div>
             </aside>
@@ -1777,7 +2044,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
     showMenu: false
   };
   const isValidScreen = Boolean(route);
-  const routeTargetUrl = route?.url || null;
+  const routeTargetUrl = localizeScreenRouteTarget(route?.url || null, route?.owner);
 
   React.useEffect(() => {
     let closed = false;
@@ -1896,6 +2163,7 @@ function Panel({
   icon,
   compact,
   className,
+  headerExtra,
   children
 }: {
   id?: string;
@@ -1903,12 +2171,14 @@ function Panel({
   icon: React.ReactNode;
   compact?: boolean;
   className?: string;
+  headerExtra?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section id={id} className={compact ? `panel compact ${className || ""}`.trim() : `panel ${className || ""}`.trim()}>
       <div className="panel-heading">
         <h2>{icon}{title}</h2>
+        {headerExtra}
       </div>
       {children}
     </section>
@@ -2025,6 +2295,29 @@ function withRoom(path: string) {
   const url = new URL(path, window.location.origin);
   url.searchParams.set("room", room);
   return absolute ? url.toString() : `${url.pathname}${url.search}`;
+}
+
+function isLocalRouteHostname(hostname: string) {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "0.0.0.0" ||
+    normalized.endsWith(".local") ||
+    /^10\./.test(normalized) ||
+    /^192\.168\./.test(normalized) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized)
+  );
+}
+
+function localizeScreenRouteTarget(url: string | null, owner: ScreenOwner | undefined) {
+  if (!url || (owner !== "vj" && owner !== "baofa")) return url;
+  if (typeof window === "undefined" || !isLocalRouteHostname(window.location.hostname)) return url;
+  const target = new URL(url, window.location.origin);
+  target.protocol = window.location.protocol;
+  target.hostname = window.location.hostname;
+  target.port = owner === "vj" ? "4302" : "4303";
+  return target.toString().replace(/\/$/, "");
 }
 
 function formatMs(value: number) {

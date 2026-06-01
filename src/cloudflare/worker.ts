@@ -583,6 +583,12 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       state.modules.interaction.evolution = 0;
       state.modules.interaction.lastInteraction = null;
       state.modules.interaction.screenPulse = null;
+      state.show.status = "standby";
+      state.show.startedAt = null;
+      state.show.positionMs = 0;
+      state.show.beat = 0;
+      state.show.bar = 1;
+      state.modules.audio.transport = "stopped";
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as PerformanceState["modules"]["interaction"]["visualMode"];
@@ -633,7 +639,14 @@ function buildControlPatchMessages(command: ControlCommand, state: PerformanceSt
   }
   if (command.module === "audio") return [{ type: "state.patch", module: "audio", patch: state.modules.audio as unknown as JsonRecord, updatedAt }];
   if (command.module === "visual" || command.module === "video") return [{ type: "state.patch", module: "visual", patch: state.modules.visual as unknown as JsonRecord, updatedAt }];
-  if (command.module === "interaction") return [{ type: "state.patch", module: "interaction", patch: state.modules.interaction as unknown as JsonRecord, updatedAt }];
+  if (command.module === "interaction") {
+    const messages: SyncMessage[] = [{ type: "state.patch", module: "interaction", patch: state.modules.interaction as unknown as JsonRecord, updatedAt }];
+    if (command.command === "resetTree") {
+      messages.push({ type: "show.patch", patch: state.show, updatedAt });
+      messages.push({ type: "state.patch", module: "audio", patch: { transport: state.modules.audio.transport }, updatedAt });
+    }
+    return messages;
+  }
   return [];
 }
 

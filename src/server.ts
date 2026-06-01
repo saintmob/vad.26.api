@@ -297,7 +297,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     store.applyControlCommand(command);
     snapshotWriter?.schedule(store.getState());
     const ack = { type: "control.ack", ok: true, command } as const;
-    broadcastControlSync(hub, store, command, ack, socketProfiles);
+    broadcastControlSync(hub, store, command, ack, socketProfiles, origin, resolveRequestRoom(req.query));
     res.status(202).json({ ok: true, command, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
   });
 
@@ -470,7 +470,7 @@ function attachWebSocket(
         }
         store.applyControlCommand(command);
         snapshotWriter?.schedule(store.getState());
-        broadcastControlSync(hub, store, command, { type: "control.ack", ok: true, command }, socketProfiles);
+        broadcastControlSync(hub, store, command, { type: "control.ack", ok: true, command }, socketProfiles, origin, room);
         return;
       }
 
@@ -514,17 +514,20 @@ function broadcastControlSync(
   store: ShowStateStore,
   command: ControlCommand,
   ack: { type: "control.ack"; ok: true; command: ControlCommand },
-  socketProfiles: WeakMap<WebSocket, SocketProfile>
+  socketProfiles: WeakMap<WebSocket, SocketProfile>,
+  origin?: string,
+  room?: string | null
 ) {
   broadcastSyncMessage(hub, socketProfiles, command);
   broadcastSyncMessage(hub, socketProfiles, ack);
-  for (const message of buildControlPatchMessages(command, store.getState())) {
+  for (const message of buildControlPatchMessages(command, store.getState(), origin, room)) {
     broadcastSyncMessage(hub, socketProfiles, message);
   }
 }
 
-function buildControlPatchMessages(command: ControlCommand, state: PerformanceState): SyncMessage[] {
+function buildControlPatchMessages(command: ControlCommand, state: PerformanceState, origin?: string, room?: string | null): SyncMessage[] {
   const updatedAt = state.updatedAt;
+  const routeResolvedState = origin ? resolveStateForRequest(state, origin, room) : state;
 
   if (command.module === "show") {
     const audioPatch: JsonRecord = {};
@@ -549,7 +552,12 @@ function buildControlPatchMessages(command: ControlCommand, state: PerformanceSt
   }
 
   if (command.module === "interaction") {
-    return [{ type: "state.patch", module: "interaction", patch: pickInteractionControlPatch(command, state), updatedAt }];
+    const messages: SyncMessage[] = [{ type: "state.patch", module: "interaction", patch: pickInteractionControlPatch(command, routeResolvedState), updatedAt }];
+    if (command.command === "resetTree") {
+      messages.push({ type: "show.patch", patch: state.show, updatedAt });
+      messages.push({ type: "state.patch", module: "audio", patch: { transport: state.modules.audio.transport }, updatedAt });
+    }
+    return messages;
   }
 
   return [{ type: "show.patch", patch: state.show, updatedAt }];

@@ -20,6 +20,7 @@ const lanHost = String(env.VITE_LAN_HOST || env.SHOW_LAN_HOST || "").trim();
 const hostedVjScreenOrigin = "https://doit-pearl.vercel.app";
 const hostedBaofaScreenOrigin = "https://baofa.vercel.app";
 const visualScenePresets: Record<string, string> = {
+  "Video Flow": "Video Flow",
   "Layered Stage": "Layered Stage",
   Purple: "Purple",
   "Blue Font": "Blue Font",
@@ -31,6 +32,7 @@ const visualScenePresets: Record<string, string> = {
   Void: "Dark Space",
   Cyber: "Cyberpunk"
 };
+const visualSceneIds = Object.keys(visualScenePresets);
 
 export const firebaseShowId = resolveShowId();
 
@@ -351,6 +353,12 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
       patch["modules/interaction/evolution"] = 0;
       patch["modules/interaction/lastInteraction"] = null;
       patch["modules/interaction/screenPulse"] = null;
+      patch["show/status"] = "standby";
+      patch["show/startedAt"] = null;
+      patch["show/positionMs"] = 0;
+      patch["show/beat"] = 0;
+      patch["show/bar"] = 1;
+      patch["modules/audio/transport"] = "stopped";
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       patch["modules/interaction/visualMode"] = String(value);
@@ -382,9 +390,50 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
     if (command.command === "setScreenRoutePreset") {
       const preset = normalizeScreenRoutePreset(value || command.target);
       if (preset) {
-        patch["modules/interaction/screenRoutePreset"] = preset;
+        const customPreset = (currentState?.modules.interaction.customScreenRoutePresets || []).find((entry) => entry.id === preset);
+        if (customPreset) {
+          patch["modules/interaction/screenRoutePreset"] = customPreset.id;
+          for (const screenId of screenIds) {
+            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, normalizeScreenOwner(customPreset.routes[screenId]) || "baofa", now, "preset");
+            const scene = normalizeVisualScene(customPreset.vjScenes[screenId]);
+            if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/scene`] = scene;
+            if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/enabled`] = true;
+          }
+        } else if (["balanced", "vj_takeover", "baofa_takeover"].includes(preset)) {
+          patch["modules/interaction/screenRoutePreset"] = preset;
+          for (const screenId of screenIds) {
+            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, ownerForPreset(screenId, preset), now, "preset");
+          }
+        }
+      }
+    }
+    if (command.command === "saveScreenRouteArrangement") {
+      const preset = normalizeScreenRouteArrangement(value, now, currentState);
+      if (preset) {
+        const presets = [
+          ...(currentState?.modules.interaction.customScreenRoutePresets || []).filter((entry) => entry.id !== preset.id),
+          preset
+        ];
+        patch["modules/interaction/customScreenRoutePresets"] = presets;
+        patch["modules/interaction/screenRoutePreset"] = preset.id;
         for (const screenId of screenIds) {
-          patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, ownerForPreset(screenId, preset), now, "preset");
+          patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, preset.routes[screenId] || "baofa", now, "preset");
+          const scene = normalizeVisualScene(preset.vjScenes[screenId]);
+          if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/scene`] = scene;
+          if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/enabled`] = true;
+        }
+      }
+    }
+    if (command.command === "deleteScreenRouteArrangement") {
+      const presetId = String(value || command.target || "").trim();
+      if (presetId && !["balanced", "vj_takeover", "baofa_takeover"].includes(presetId)) {
+        const presets = (currentState?.modules.interaction.customScreenRoutePresets || []).filter((entry) => entry.id !== presetId);
+        patch["modules/interaction/customScreenRoutePresets"] = presets;
+        if (currentState?.modules.interaction.screenRoutePreset === presetId) {
+          patch["modules/interaction/screenRoutePreset"] = "balanced";
+          for (const screenId of screenIds) {
+            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, ownerForPreset(screenId, "balanced"), now, "preset");
+          }
         }
       }
     }
@@ -412,7 +461,46 @@ function normalizeScreenOwner(value: unknown): ScreenOwner | null {
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
-  return ["balanced", "vj_takeover", "baofa_takeover"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
+  const preset = String(value || "").trim();
+  return preset ? preset as ScreenRoutePreset : null;
+}
+
+function normalizeScreenRouteArrangement(value: unknown, now: number, currentState: PerformanceState | null) {
+  if (!isRecord(value)) return null;
+  const rawId = String(value.id || "").trim();
+  const id = rawId && !["balanced", "vj_takeover", "baofa_takeover"].includes(rawId)
+    ? rawId
+    : `custom-${createIdFragment()}`;
+  const inputRoutes = isRecord(value.routes) ? value.routes : {};
+  const inputScenes = isRecord(value.vjScenes) ? value.vjScenes : {};
+  const routes: Record<string, ScreenOwner> = {};
+  const vjScenes: Record<string, string> = {};
+
+  for (const screenId of screenIds) {
+    const owner = normalizeScreenOwner(inputRoutes[screenId])
+      || normalizeScreenOwner(currentState?.modules.interaction.screenRoutes?.[screenId]?.owner)
+      || ownerForPreset(screenId, "balanced");
+    routes[screenId] = owner;
+    const currentScreen = currentState?.modules.visual.visualScreens?.find((screen) => screen.id === screenId);
+    const scene = normalizeVisualScene(inputScenes[screenId]) || currentScreen?.scene || "Video Flow";
+    if (owner === "vj") vjScenes[screenId] = scene;
+  }
+
+  return {
+    id,
+    name: String(value.name || value.label || "自定义编排").trim().slice(0, 40) || "自定义编排",
+    routes,
+    vjScenes,
+    userDefined: true,
+    createdAt: typeof value.createdAt === "number" ? value.createdAt : now,
+    updatedAt: now
+  };
+}
+
+function normalizeVisualScene(value: unknown) {
+  const scene = String(value || "").trim();
+  if (!scene) return null;
+  return visualSceneIds.includes(scene) ? scene : scene;
 }
 
 function ownerForPreset(screenId: string, preset: ScreenRoutePreset): ScreenOwner {

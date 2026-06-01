@@ -10,9 +10,12 @@ import {
   MODULE_NAMES,
   ModuleName,
   PerformanceState,
+  ScreenRouteArrangementPreset,
   ScreenOwner,
   ScreenRouteEntry,
-  ScreenRoutePreset
+  BuiltInScreenRoutePreset,
+  ScreenRoutePreset,
+  VisualScreenState
 } from "./types.js";
 
 const DEFAULT_BANDS = Array.from({ length: 16 }, () => 0);
@@ -37,9 +40,11 @@ const SCREEN_TOPOLOGY = [
 
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
+const BUILT_IN_SCREEN_ROUTE_PRESETS: BuiltInScreenRoutePreset[] = ["balanced", "vj_takeover", "baofa_takeover"];
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 const VISUAL_SCENE_PRESETS: Record<string, string> = {
+  "Video Flow": "Video Flow",
   "Layered Stage": "Layered Stage",
   Purple: "Purple",
   "Blue Font": "Blue Font",
@@ -51,6 +56,7 @@ const VISUAL_SCENE_PRESETS: Record<string, string> = {
   Void: "Dark Space",
   Cyber: "Cyberpunk"
 };
+const VISUAL_SCENE_IDS = Object.keys(VISUAL_SCENE_PRESETS);
 const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
   const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
   return origin ? `${origin.protocol}//${origin.host}` : null;
@@ -155,7 +161,8 @@ export function createDefaultState(now = Date.now()): PerformanceState {
         },
         audioDriveMode: "mic",
         fullscreen: false,
-        visualMemories: []
+        visualMemories: [],
+        visualScreens: createDefaultVisualScreens()
       },
       interaction: createDefaultInteractionModule()
     },
@@ -179,6 +186,7 @@ function createDefaultInteractionModule(): InteractionModuleState {
     screenRegistry: createDefaultScreenRegistry(),
     screenRoutes: createScreenRoutesForPreset("balanced", now),
     screenRoutePreset: "balanced",
+    customScreenRoutePresets: [],
     screenPresentation: {
       autoRedirect: true,
       showDebug: false,
@@ -322,6 +330,8 @@ function inferModule(command: string): ControlCommand["module"] {
     "setScreen",
     "setScreenOwner",
     "setScreenRoutePreset",
+    "saveScreenRouteArrangement",
+    "deleteScreenRouteArrangement",
     "setScreenAutoRedirect",
     "setScreenDebugVisible",
     "setScreenMenuVisible",
@@ -585,6 +595,12 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.modules.interaction.evolution = 0;
       state.modules.interaction.lastInteraction = null;
       state.modules.interaction.screenPulse = null;
+      state.show.status = "standby";
+      state.show.startedAt = null;
+      state.show.positionMs = 0;
+      state.show.beat = 0;
+      state.show.bar = 1;
+      state.modules.audio.transport = "stopped";
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as InteractionModuleState["visualMode"];
@@ -616,8 +632,33 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     if (command.command === "setScreenRoutePreset") {
       const preset = normalizeScreenRoutePreset(value || command.target);
       if (preset) {
-        state.modules.interaction.screenRoutePreset = preset;
-        state.modules.interaction.screenRoutes = createScreenRoutesForPreset(preset, Date.now());
+        const customPreset = state.modules.interaction.customScreenRoutePresets.find((entry) => entry.id === preset);
+        if (customPreset) applyScreenRouteArrangement(state, customPreset, Date.now());
+        else if (isBuiltInScreenRoutePreset(preset)) {
+          state.modules.interaction.screenRoutePreset = preset;
+          state.modules.interaction.screenRoutes = createScreenRoutesForPreset(preset, Date.now());
+        }
+      }
+    }
+    if (command.command === "saveScreenRouteArrangement") {
+      const now = Date.now();
+      const preset = normalizeScreenRouteArrangement(value, now, state);
+      if (preset) {
+        state.modules.interaction.customScreenRoutePresets = [
+          ...state.modules.interaction.customScreenRoutePresets.filter((entry) => entry.id !== preset.id),
+          preset
+        ];
+        applyScreenRouteArrangement(state, preset, now);
+      }
+    }
+    if (command.command === "deleteScreenRouteArrangement") {
+      const presetId = String(value || command.target || "").trim();
+      if (presetId && !isBuiltInScreenRoutePreset(presetId)) {
+        state.modules.interaction.customScreenRoutePresets = state.modules.interaction.customScreenRoutePresets.filter((entry) => entry.id !== presetId);
+        if (state.modules.interaction.screenRoutePreset === presetId) {
+          state.modules.interaction.screenRoutePreset = "balanced";
+          state.modules.interaction.screenRoutes = createScreenRoutesForPreset("balanced", Date.now());
+        }
       }
     }
     if (command.command === "setScreenAutoRedirect") {
@@ -657,9 +698,11 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
   );
   state.operationLock.locked = state.operationLock.lockedModules.length > 0;
   state.modules.visual.audioDriveMode = normalizeVisualAudioDriveMode(state.modules.visual.audioDriveMode);
+  state.modules.visual.visualScreens = normalizeVisualScreens(state.modules.visual.visualScreens);
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
   state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
+  state.modules.interaction.customScreenRoutePresets = normalizeCustomScreenRoutePresets(state.modules.interaction.customScreenRoutePresets);
   state.modules.interaction.screenPresentation = normalizeScreenPresentation(state.modules.interaction.screenPresentation);
   state.modules.interaction.screenId = normalizeScreenOccupancyId(state.modules.interaction.screenId) || state.modules.interaction.screenId;
   state.modules.interaction.role = ["MASTER", "A1"].includes(state.modules.interaction.screenId) ? "master" : "screen";
@@ -757,6 +800,16 @@ function createDefaultScreenRegistry() {
     label: `Screen ${id}`,
     enabled: true,
     physicalIndex: index + 1
+  }));
+}
+
+function createDefaultVisualScreens(): VisualScreenState[] {
+  return SCREEN_IDS.map((id, index) => ({
+    id,
+    name: `Show Screen ${id}`,
+    device: index === 0 ? "stage" : "led",
+    scene: index === 0 ? "Layered Stage" : index % 4 === 1 ? "Topology" : index % 4 === 2 ? "Pulse" : "Liquid",
+    enabled: true
   }));
 }
 
@@ -878,6 +931,37 @@ function normalizeScreenRegistry(value: unknown) {
   });
 }
 
+function normalizeVisualScreens(value: unknown): VisualScreenState[] {
+  const defaults = createDefaultVisualScreens();
+  const byId = new Map<string, unknown>(Array.isArray(value) ? value.map((item) => {
+    const record = isRecord(item) ? item : {};
+    return [String(record.id || ""), record];
+  }) : []);
+
+  return defaults.map((screen) => {
+    const record = isRecord(byId.get(screen.id)) ? byId.get(screen.id) as JsonRecord : {};
+    return {
+      id: screen.id,
+      name: String(record.name || screen.name),
+      device: normalizeVisualDevice(record.device) || screen.device,
+      scene: normalizeVisualScene(record.scene) || screen.scene,
+      enabled: typeof record.enabled === "boolean" ? record.enabled : screen.enabled
+    };
+  });
+}
+
+function normalizeVisualDevice(value: unknown): VisualScreenState["device"] | null {
+  return ["stage", "projector", "led", "tablet", "phone"].includes(String(value))
+    ? String(value) as VisualScreenState["device"]
+    : null;
+}
+
+function normalizeVisualScene(value: unknown): string | null {
+  const scene = String(value || "").trim();
+  if (!scene) return null;
+  return VISUAL_SCENE_IDS.includes(scene) ? scene : scene;
+}
+
 function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
   const defaults = createScreenRoutesForPreset(preset, Date.now());
   if (!isRecord(value)) return defaults;
@@ -903,13 +987,81 @@ function normalizeScreenOwner(value: unknown): ScreenOwner | null {
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
-  return ["balanced", "vj_takeover", "baofa_takeover"].includes(String(value)) ? String(value) as ScreenRoutePreset : null;
+  const preset = String(value || "").trim();
+  return preset ? preset : null;
+}
+
+function isBuiltInScreenRoutePreset(value: ScreenRoutePreset): value is BuiltInScreenRoutePreset {
+  return BUILT_IN_SCREEN_ROUTE_PRESETS.includes(value as BuiltInScreenRoutePreset);
+}
+
+function normalizeCustomScreenRoutePresets(value: unknown): ScreenRouteArrangementPreset[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((entry) => normalizeScreenRouteArrangement(entry, Date.now(), null))
+    .filter((entry): entry is ScreenRouteArrangementPreset => Boolean(entry))
+    .filter((entry) => {
+      if (isBuiltInScreenRoutePreset(entry.id) || seen.has(entry.id)) return false;
+      seen.add(entry.id);
+      return true;
+    });
+}
+
+function normalizeScreenRouteArrangement(value: unknown, now: number, state: PerformanceState | null): ScreenRouteArrangementPreset | null {
+  if (!isRecord(value)) return null;
+  const rawId = String(value.id || "").trim();
+  const id = rawId && !isBuiltInScreenRoutePreset(rawId) ? rawId : `custom-${crypto.randomUUID().slice(0, 8)}`;
+  const name = String(value.name || value.label || "自定义编排").trim().slice(0, 40) || "自定义编排";
+  const inputRoutes = isRecord(value.routes) ? value.routes : {};
+  const inputScenes = isRecord(value.vjScenes) ? value.vjScenes : {};
+  const routes: Record<string, ScreenOwner> = {};
+  const vjScenes: Record<string, string> = {};
+  const currentRoutes = state?.modules.interaction.screenRoutes || {};
+  const currentScreens = new Map((state?.modules.visual.visualScreens || createDefaultVisualScreens()).map((screen) => [screen.id, screen]));
+
+  for (const screenId of SCREEN_IDS) {
+    const owner = normalizeScreenOwner(inputRoutes[screenId])
+      || normalizeScreenOwner(currentRoutes[screenId]?.owner)
+      || ownerForPreset(screenId, "balanced");
+    routes[screenId] = owner;
+
+    const scene = normalizeVisualScene(inputScenes[screenId]) || currentScreens.get(screenId)?.scene || "Video Flow";
+    if (owner === "vj") vjScenes[screenId] = scene;
+  }
+
+  return {
+    id,
+    name,
+    routes,
+    vjScenes,
+    userDefined: true,
+    createdAt: positiveNumber(value.createdAt, now),
+    updatedAt: now
+  };
+}
+
+function applyScreenRouteArrangement(state: PerformanceState, preset: ScreenRouteArrangementPreset, now: number) {
+  const routes: Record<string, ScreenRouteEntry> = {};
+  for (const screenId of SCREEN_IDS) {
+    const owner = normalizeScreenOwner(preset.routes[screenId]) || "baofa";
+    routes[screenId] = makeScreenRoute(screenId, owner, now, "preset");
+  }
+  state.modules.interaction.screenRoutePreset = preset.id;
+  state.modules.interaction.screenRoutes = routes;
+  state.modules.visual.visualScreens = normalizeVisualScreens(
+    state.modules.visual.visualScreens.map((screen) => {
+      const scene = preset.vjScenes[screen.id];
+      return scene ? { ...screen, scene, enabled: true } : screen;
+    })
+  );
 }
 
 export function sanitizeInteractionModulePatch(patch: JsonRecord) {
   const sanitized = { ...patch };
   delete sanitized.screenRoutes;
   delete sanitized.screenRoutePreset;
+  delete sanitized.customScreenRoutePresets;
   delete sanitized.screenPresentation;
   return sanitized;
 }

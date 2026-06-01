@@ -142,6 +142,94 @@ test("updates screen route preset and individual screen owners", async () => {
   });
 });
 
+test("saves, applies, and deletes user screen route arrangements", async () => {
+  await withServer(async (baseUrl) => {
+    const saveResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "custom-route",
+        command: "saveScreenRouteArrangement",
+        value: {
+          id: "custom-visual-a",
+          name: "Visual A",
+          routes: {
+            A1: "vj",
+            B1: "vj",
+            B2: "baofa"
+          },
+          vjScenes: {
+            A1: "Video Flow",
+            B1: "Dumbar"
+          }
+        },
+        issuedBy: "test"
+      })
+    });
+    const saveBody = await saveResponse.json();
+
+    assert.equal(saveResponse.status, 202);
+    assert.equal(saveBody.state.modules.interaction.screenRoutePreset, "custom-visual-a");
+    assert.equal(saveBody.state.modules.interaction.screenRoutes.A1.owner, "vj");
+    assert.equal(saveBody.state.modules.interaction.screenRoutes.B1.owner, "vj");
+    assert.equal(saveBody.state.modules.interaction.screenRoutes.B2.owner, "baofa");
+    assert.equal(saveBody.state.modules.interaction.customScreenRoutePresets.length, 1);
+    assert.equal(saveBody.state.modules.interaction.customScreenRoutePresets[0].name, "Visual A");
+    assert.equal(saveBody.state.modules.visual.visualScreens.find((screen) => screen.id === "A1")?.scene, "Video Flow");
+    assert.equal(saveBody.state.modules.visual.visualScreens.find((screen) => screen.id === "B1")?.scene, "Dumbar");
+
+    const applyResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "custom-visual-a",
+        command: "setScreenRoutePreset",
+        value: "custom-visual-a",
+        issuedBy: "test"
+      })
+    });
+    const applyBody = await applyResponse.json();
+
+    assert.equal(applyResponse.status, 202);
+    assert.equal(applyBody.state.modules.interaction.screenRoutes.B1.owner, "vj");
+    assert.equal(applyBody.state.modules.visual.visualScreens.find((screen) => screen.id === "B1")?.scene, "Dumbar");
+
+    const factoryDeleteResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "balanced",
+        command: "deleteScreenRouteArrangement",
+        value: "balanced",
+        issuedBy: "test"
+      })
+    });
+    const factoryDeleteBody = await factoryDeleteResponse.json();
+    assert.equal(factoryDeleteResponse.status, 202);
+    assert.equal(factoryDeleteBody.state.modules.interaction.customScreenRoutePresets.length, 1);
+
+    const deleteResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "custom-visual-a",
+        command: "deleteScreenRouteArrangement",
+        value: "custom-visual-a",
+        issuedBy: "test"
+      })
+    });
+    const deleteBody = await deleteResponse.json();
+
+    assert.equal(deleteResponse.status, 202);
+    assert.equal(deleteBody.state.modules.interaction.customScreenRoutePresets.length, 0);
+    assert.equal(deleteBody.state.modules.interaction.screenRoutePreset, "balanced");
+  });
+});
+
 test("ignores route-control fields in interaction module patches", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/modules/interaction/state`, {
@@ -576,7 +664,14 @@ test("applies baofa visual mode controls", async () => {
     assert.equal(resetResponse.status, 202);
     assert.equal(resetBody.state.modules.interaction.treeGrowth, 0);
     assert.equal(resetBody.state.modules.interaction.treePhase, "idle");
+    assert.equal(resetBody.state.modules.interaction.mode, "idle");
+    assert.equal(resetBody.state.modules.interaction.visualMode, "tree");
     assert.equal(resetBody.state.modules.interaction.baofaFishState, "running");
+    assert.equal(resetBody.state.modules.audio.transport, "stopped");
+    assert.equal(resetBody.state.show.status, "standby");
+    assert.equal(resetBody.state.show.positionMs, 0);
+    assert.equal(resetBody.state.show.beat, 0);
+    assert.equal(resetBody.state.show.bar, 1);
   });
 });
 
@@ -805,12 +900,13 @@ test("websocket filters sync traffic by client role and avoids control snapshots
         module: "interaction",
         target: "A1",
         command: "setScreenOwner",
-        value: "diagnostic",
+        value: "baofa",
         issuedBy: "test-dashboard"
       }));
 
       const routePatch = await routePatchPromise;
-      assert.equal(routePatch.patch.screenRoutes.A1.owner, "diagnostic");
+      assert.equal(routePatch.patch.screenRoutes.A1.owner, "baofa");
+      assert.equal(routePatch.patch.screenRoutes.A1.url, expectedScreenRouteUrl(baseUrl, 4303, "A1"));
     } finally {
       if (dashboard.readyState !== WebSocket.CLOSED) dashboard.terminate();
       if (screenGateway.readyState !== WebSocket.CLOSED) screenGateway.terminate();
