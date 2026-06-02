@@ -540,12 +540,19 @@ function makeScreenRouteForPreset(screenId: string, preset: ScreenRoutePreset, u
     return {
       screenId,
       owner: "external" as ScreenOwner,
-      url: externalUrl,
+      url: resolveExternalScreenRouteUrl(externalUrl, screenId),
       updatedAt,
       source
     };
   }
   return makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, source);
+}
+
+function resolveExternalScreenRouteUrl(value: string, screenId: string) {
+  const url = new URL(value);
+  url.searchParams.set("screenId", screenId);
+  if (firebaseShowId && firebaseShowId !== "show-main") url.searchParams.set("room", firebaseShowId);
+  return url.toString();
 }
 
 function openStream(path: string, onRemoteChange: () => void | Promise<void>) {

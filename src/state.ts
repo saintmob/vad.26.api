@@ -883,10 +883,17 @@ function makeExternalScreenRoute(screenId: string, preset: ScreenRoutePreset, ur
   return {
     screenId,
     owner: "external",
-    url,
+    url: resolveExternalScreenRouteUrl(url, screenId),
     updatedAt,
     source: source || preset
   };
+}
+
+function resolveExternalScreenRouteUrl(value: string, screenId: string, room?: string | null) {
+  const url = new URL(value);
+  url.searchParams.set("screenId", screenId);
+  if (room && room !== "show-main") url.searchParams.set("room", room);
+  return url.toString();
 }
 
 export function resolveScreenRouteUrl(origin: string | null | undefined, owner: ScreenOwner, screenId: string, room?: string | null) {

@@ -737,12 +737,19 @@ function makeScreenRouteForPreset(screenId: string, preset: ScreenRoutePreset, u
     return {
       screenId,
       owner: "external" as ScreenOwner,
-      url: externalUrl,
+      url: resolveExternalScreenRouteUrl(externalUrl, screenId, room),
       updatedAt,
       source
     };
   }
   return makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, source, origin, env, room);
+}
+
+function resolveExternalScreenRouteUrl(value: string, screenId: string, room?: string | null) {
+  const url = new URL(value);
+  url.searchParams.set("screenId", screenId);
+  if (room && room !== "show-main") url.searchParams.set("room", room);
+  return url.toString();
 }
 
 function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source: string, origin: string, env: Env, room?: string | null) {

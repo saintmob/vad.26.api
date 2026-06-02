@@ -50,6 +50,13 @@ function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string)
   return url.toString().replace(/\/$/, "");
 }
 
+function expectedExternalScreenRouteUrl(baseUrl: string, screenId: string, room?: string) {
+  const url = new URL(baseUrl);
+  url.searchParams.set("screenId", screenId);
+  if (room && room !== "show-main") url.searchParams.set("room", room);
+  return url.toString();
+}
+
 test("serves API spec and initial state", async () => {
   await withServer(async (baseUrl) => {
     const spec = await fetch(`${baseUrl}/api/spec`).then((res) => res.json());
@@ -161,9 +168,9 @@ test("applies external route presets and switches back to local modules", async 
     assert.equal(checkinResponse.status, 202);
     assert.equal(checkinBody.state.modules.interaction.screenRoutePreset, "checkin");
     assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.owner, "external");
-    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.url, "https://sign-rho-azure.vercel.app/");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.url, expectedExternalScreenRouteUrl("https://sign-rho-azure.vercel.app/", "A1"));
     assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.owner, "external");
-    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.url, "https://sign-rho-azure.vercel.app/");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.url, expectedExternalScreenRouteUrl("https://sign-rho-azure.vercel.app/", "R2"));
 
     const baofaResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
