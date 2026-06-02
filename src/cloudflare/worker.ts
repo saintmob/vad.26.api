@@ -97,7 +97,11 @@ export default {
     headers.set("x-show-id", showId);
     headers.set("x-public-origin", `${url.protocol}//${url.host}`);
     const forwarded = new Request(request, { headers });
-    return stub.fetch(forwarded);
+    try {
+      return await stub.fetch(forwarded);
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
   }
 };
 
