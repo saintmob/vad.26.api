@@ -1153,11 +1153,13 @@ input::placeholder {
 }
 
 .rail-shell {
+  min-width: 0;
   min-height: 0;
   height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   padding: 6px;
+  overflow: hidden;
 }
 
 .rail-header,
@@ -1235,18 +1237,23 @@ input::placeholder {
 }
 
 .route-presets-rail {
-  display: flex;
+  min-width: 0;
+  display: block;
   align-items: center;
-  gap: 8px;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  overflow: hidden;
 }
 
 .route-presets-rail .route-presets {
+  min-width: 0;
+  width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 0;
 }
 
 .route-presets-rail .rail-label {
@@ -1259,20 +1266,23 @@ input::placeholder {
 }
 
 .route-presets-rail .route-presets {
-  flex: 1;
-  margin-top: 0;
-  gap: 4px;
+  flex: initial;
 }
 
 .route-presets-rail .route-presets button {
+  min-width: 0;
   min-height: 24px;
   padding: 0 7px;
   font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .route-presets-rail--custom {
   align-items: stretch;
-  flex-direction: column;
+  display: grid;
+  gap: 5px;
 }
 
 .custom-preset-list {
@@ -1772,24 +1782,30 @@ input::placeholder {
   border-radius: 8px;
 }
 
-.show-status-pill {
+.show-status-icon {
+  width: 30px;
+  min-width: 30px;
   min-height: 30px;
   display: inline-flex;
   align-items: center;
-  padding: 0 9px;
+  justify-content: center;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--muted);
-  font-size: 9px;
-  font-weight: 850;
-  text-transform: uppercase;
-  white-space: nowrap;
+  background: var(--surface);
 }
 
-.show-status-pill--running {
+.show-status-icon--running {
   border-color: color-mix(in srgb, var(--audio) 45%, var(--border));
   color: var(--audio);
   background: color-mix(in srgb, var(--audio) 10%, transparent);
+}
+
+.show-status-icon--paused {
+  border-color: color-mix(in srgb, var(--visual) 45%, var(--border));
+  color: var(--visual);
+  background: color-mix(in srgb, var(--visual) 9%, transparent);
 }
 
 .stage-overlay-tools {
@@ -1850,7 +1866,7 @@ input::placeholder {
 }
 
 .operator-card--row {
-  grid-template-columns: minmax(128px, 0.15fr) minmax(0, 1fr);
+  grid-template-columns: minmax(108px, 0.12fr) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -1883,15 +1899,15 @@ input::placeholder {
 }
 
 .operator-row-body--dj {
-  grid-template-columns: minmax(136px, 0.7fr) minmax(150px, 0.9fr) minmax(210px, 1.35fr) minmax(170px, 0.95fr);
+  grid-template-columns: minmax(150px, 0.55fr) minmax(210px, 0.72fr) minmax(330px, 1.1fr) minmax(270px, 0.9fr);
 }
 
 .operator-row-body--vj {
-  grid-template-columns: minmax(130px, 0.45fr) minmax(0, 1.7fr) minmax(300px, 1.2fr);
+  grid-template-columns: minmax(220px, 0.58fr) minmax(430px, 1.16fr) minmax(360px, 1fr);
 }
 
 .operator-row-body--baofa {
-  grid-template-columns: minmax(150px, 0.55fr) minmax(260px, 1.3fr) minmax(170px, 0.75fr) auto;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(360px, 1.2fr) minmax(220px, 0.78fr) auto;
 }
 
 .operator-actions {
@@ -1915,6 +1931,7 @@ input::placeholder {
 
 .operator-actions--drive {
   padding: 5px;
+  align-content: stretch;
   border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--border));
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--brand) 8%, var(--surface));
@@ -2911,6 +2928,41 @@ input::placeholder {
   background:
     radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--visual) 18%, transparent), transparent 32%),
     var(--bg);
+}
+
+.screen-gateway--external {
+  padding: 0;
+  background: #05070d;
+}
+
+.screen-gateway--external iframe {
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  border: 0;
+  background: #05070d;
+}
+
+.screen-gateway-toolbar {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  box-shadow: var(--shadow);
+  font-size: 10px;
+}
+
+.screen-gateway-toolbar strong {
+  color: var(--text);
+  font-size: 10px;
 }
 
 .screen-gateway section {

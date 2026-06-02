@@ -453,8 +453,12 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
     if (command.command === "setScreenMenuVisible") {
       patch["modules/interaction/screenPresentation/showMenu"] = Boolean(value);
     }
+    if (command.command === "setScreenCameraEnabled") {
+      patch["modules/interaction/screenPresentation/cameraEnabled"] = Boolean(value);
+    }
     if (command.command === "setScreenPresentation" && isRecord(value)) {
       if (typeof value.autoRedirect === "boolean") patch["modules/interaction/screenPresentation/autoRedirect"] = value.autoRedirect;
+      if (typeof value.cameraEnabled === "boolean") patch["modules/interaction/screenPresentation/cameraEnabled"] = value.cameraEnabled;
       if (typeof value.showDebug === "boolean") patch["modules/interaction/screenPresentation/showDebug"] = value.showDebug;
       if (typeof value.showMenu === "boolean") patch["modules/interaction/screenPresentation/showMenu"] = value.showMenu;
     }

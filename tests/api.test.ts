@@ -69,6 +69,7 @@ test("serves API spec and initial state", async () => {
     assert.equal(state.modules.interaction.screenRoutes.A1.url, expectedScreenRouteUrl(baseUrl, 4302, "A1"));
     assert.equal(state.modules.interaction.screenRoutes.R2.url, expectedScreenRouteUrl(baseUrl, 4303, "R2"));
     assert.equal(state.modules.interaction.screenPresentation.autoRedirect, true);
+    assert.equal(state.modules.interaction.screenPresentation.cameraEnabled, false);
     assert.equal(state.modules.interaction.screenPresentation.showDebug, true);
     assert.equal(state.modules.interaction.screenPresentation.showMenu, true);
   }, { loadSnapshot: false });
@@ -306,6 +307,7 @@ test("ignores route-control fields in interaction module patches", async () => {
     assert.equal(body.state.modules.interaction.screenRoutePreset, "balanced");
     assert.equal(body.state.modules.interaction.screenRoutes.A1.owner, "vj");
     assert.equal(body.state.modules.interaction.screenPresentation.autoRedirect, true);
+    assert.equal(body.state.modules.interaction.screenPresentation.cameraEnabled, false);
     assert.equal(body.state.modules.interaction.screenRoutes.R2.url, expectedScreenRouteUrl(baseUrl, 4303, "R2"));
   });
 });
@@ -351,7 +353,7 @@ test("updates screen presentation controls", async () => {
         module: "interaction",
         target: "screen-presentation",
         command: "setScreenPresentation",
-        value: { autoRedirect: false, showMenu: true },
+        value: { autoRedirect: false, cameraEnabled: true, showMenu: true },
         issuedBy: "test"
       })
     });
@@ -359,6 +361,7 @@ test("updates screen presentation controls", async () => {
 
     assert.equal(presentation.status, 202);
     assert.equal(presentationBody.state.modules.interaction.screenPresentation.autoRedirect, false);
+    assert.equal(presentationBody.state.modules.interaction.screenPresentation.cameraEnabled, true);
     assert.equal(presentationBody.state.modules.interaction.screenPresentation.showDebug, true);
     assert.equal(presentationBody.state.modules.interaction.screenPresentation.showMenu, true);
   });

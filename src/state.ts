@@ -195,6 +195,7 @@ function createDefaultInteractionModule(): InteractionModuleState {
     customScreenRoutePresets: [],
     screenPresentation: {
       autoRedirect: true,
+      cameraEnabled: false,
       showDebug: false,
       showMenu: false,
       configured: false
@@ -694,6 +695,10 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.modules.interaction.screenPresentation.showMenu = Boolean(value);
       state.modules.interaction.screenPresentation.configured = true;
     }
+    if (command.command === "setScreenCameraEnabled") {
+      state.modules.interaction.screenPresentation.cameraEnabled = Boolean(value);
+      state.modules.interaction.screenPresentation.configured = true;
+    }
     if (command.command === "setScreenPresentation" && isRecord(value)) {
       state.modules.interaction.screenPresentation = normalizeScreenPresentation({
         ...state.modules.interaction.screenPresentation,
@@ -796,6 +801,7 @@ function normalizeScreenPresentation(value: unknown): InteractionModuleState["sc
   const record = isRecord(value) ? value : {};
   return {
     autoRedirect: typeof record.autoRedirect === "boolean" ? record.autoRedirect : true,
+    cameraEnabled: typeof record.cameraEnabled === "boolean" ? record.cameraEnabled : false,
     showDebug: typeof record.showDebug === "boolean" ? record.showDebug : false,
     showMenu: typeof record.showMenu === "boolean" ? record.showMenu : false,
     configured: typeof record.configured === "boolean" ? record.configured : false

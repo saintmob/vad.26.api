@@ -347,7 +347,7 @@ export class ShowRoomDurableObject {
           screenRegistry: SCREEN_IDS.map((id, index) => ({ id, label: `Screen ${id}`, enabled: true, physicalIndex: index + 1 })),
           screenRoutes: makeScreenRoutes("balanced", now, "", this.env),
           screenRoutePreset: "balanced",
-          screenPresentation: { autoRedirect: true, showDebug: false, showMenu: false, configured: false },
+          screenPresentation: { autoRedirect: true, cameraEnabled: false, showDebug: false, showMenu: false, configured: false },
           screenId: "C2",
           role: "screen",
           overview: false,
@@ -644,6 +644,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
     if (command.command === "setScreenAutoRedirect") state.modules.interaction.screenPresentation.autoRedirect = Boolean(value);
     if (command.command === "setScreenDebugVisible") state.modules.interaction.screenPresentation.showDebug = Boolean(value);
     if (command.command === "setScreenMenuVisible") state.modules.interaction.screenPresentation.showMenu = Boolean(value);
+    if (command.command === "setScreenCameraEnabled") state.modules.interaction.screenPresentation.cameraEnabled = Boolean(value);
     if (command.command === "setScreenPresentation" && isRecord(value)) {
       state.modules.interaction.screenPresentation = { ...state.modules.interaction.screenPresentation, ...value, configured: true };
     }
@@ -790,7 +791,7 @@ function normalizeControlCommand(input: unknown): ControlCommand {
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setStyle", "shuffleStyle", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx", "focusVideo"].includes(command)) return "visual";
-  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenPresentation"].includes(command)) return "interaction";
+  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation"].includes(command)) return "interaction";
   return "show";
 }
 

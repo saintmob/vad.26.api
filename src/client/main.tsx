@@ -1,8 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Activity,
   Aperture,
   AudioLines,
+  Camera,
   Grid3X3,
   MonitorCog,
   Pause,
@@ -1073,6 +1075,7 @@ function App() {
   const screenRoutes = snapshot.modules.interaction.screenRoutes || {};
   const screenPresentation = snapshot.modules.interaction.screenPresentation || {
     autoRedirect: true,
+    cameraEnabled: false,
     showDebug: false,
     showMenu: false
   };
@@ -1518,9 +1521,17 @@ function App() {
                         >
                           <Eye size={14} />
                         </button>
-                        <span className={`show-status-pill show-status-pill--${show.status}`}>
-                          {showStatusLabel}
+                        <span className={`show-status-icon show-status-icon--${show.status}`} title={`${ui.app.showStatus}: ${showStatusLabel}`}>
+                          <Activity size={14} />
                         </span>
+                        <button
+                          type="button"
+                          className={actionButtonClass("interaction", "setScreenCameraEnabled", "screen-camera", screenPresentation.cameraEnabled)}
+                          onClick={() => sendControl("interaction", "setScreenCameraEnabled", "screen-camera", !screenPresentation.cameraEnabled)}
+                          title={locale === "zh" ? "开启摄像头" : "Enable camera"}
+                        >
+                          <Camera size={14} />
+                        </button>
                         <button
                           type="button"
                           className={actionButtonClass("interaction", "setScreenDebugVisible", "screen-debug", screenPresentation.showDebug)}
@@ -2082,6 +2093,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
   const route = snapshot?.modules.interaction.screenRoutes?.[screenId];
   const screenPresentation = snapshot?.modules.interaction.screenPresentation || {
     autoRedirect: true,
+    cameraEnabled: false,
     showDebug: false,
     showMenu: false
   };
@@ -2155,6 +2167,10 @@ function ScreenGateway({ screenId }: { screenId: string }) {
       setMessage(`Manual routing hold for ${formatOwner(route.owner)}`);
       return;
     }
+    if (routeTargetUrl && route.owner === "external") {
+      setMessage(`Showing ${screenId} external route`);
+      return;
+    }
     if (routeTargetUrl && route.owner !== "off" && route.owner !== "diagnostic") {
       setMessage(`Routing ${screenId} to ${formatOwner(route.owner)}`);
       window.location.replace(routeTargetUrl);
@@ -2164,7 +2180,18 @@ function ScreenGateway({ screenId }: { screenId: string }) {
   }, [route, routeTargetUrl, screenId, screenPresentation.autoRedirect, snapshot]);
 
   return (
-    <main className="screen-gateway">
+    <main className={route?.owner === "external" && routeTargetUrl && screenPresentation.autoRedirect ? "screen-gateway screen-gateway--external" : "screen-gateway"}>
+      {route?.owner === "external" && routeTargetUrl && screenPresentation.autoRedirect ? (
+        <>
+          {screenPresentation.showMenu && (
+            <div className="screen-gateway-toolbar">
+              <span>{screenId}</span>
+              <strong>{connection}</strong>
+            </div>
+          )}
+          <iframe title={`${screenId} external route`} src={routeTargetUrl} />
+        </>
+      ) : (
       <section>
         <div className={`connection-dot ${connection}`} />
         <span>{connection}</span>
@@ -2186,7 +2213,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
             </div>
             <div>
               <dt>Menus / Debug</dt>
-              <dd>{screenPresentation.showMenu ? "menus shown" : "menus hidden"} · {screenPresentation.showDebug ? "debug shown" : "debug hidden"}</dd>
+              <dd>{screenPresentation.showMenu ? "menus shown" : "menus hidden"} · {screenPresentation.showDebug ? "debug shown" : "debug hidden"} · {screenPresentation.cameraEnabled ? "camera enabled" : "camera off"}</dd>
             </div>
             <div>
               <dt>Updated</dt>
@@ -2195,6 +2222,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
           </dl>
         )}
       </section>
+      )}
     </main>
   );
 }

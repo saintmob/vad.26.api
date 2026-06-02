@@ -177,6 +177,7 @@ export interface InteractionModuleState {
   customScreenRoutePresets: ScreenRouteArrangementPreset[];
   screenPresentation: {
     autoRedirect: boolean;
+    cameraEnabled: boolean;
     showDebug: boolean;
     showMenu: boolean;
     configured: boolean;
