@@ -121,10 +121,10 @@ export class ShowRoomDurableObject {
       if (url.pathname === "/ws") return this.handleWebSocket(request);
       if (url.pathname === "/api/state" && request.method === "GET") return json(this.getStateForRequest(request));
       if (url.pathname === "/api/audio-summary" && request.method === "GET") return json(this.audioSummary());
-      if (url.pathname === "/api/control" && request.method === "POST") return this.handleControl(request);
-      if (url.pathname === "/api/mixer/frame" && request.method === "POST") return this.handleAudioFrame(request);
+      if (url.pathname === "/api/control" && request.method === "POST") return await this.handleControl(request);
+      if (url.pathname === "/api/mixer/frame" && request.method === "POST") return await this.handleAudioFrame(request);
       const moduleMatch = url.pathname.match(/^\/api\/modules\/([^/]+)\/state$/);
-      if (moduleMatch && request.method === "POST") return this.handleModulePatch(request, moduleMatch[1]);
+      if (moduleMatch && request.method === "POST") return await this.handleModulePatch(request, moduleMatch[1]);
       if (url.pathname === "/api/health" && request.method === "GET") {
         return json({ ok: true, showId: request.headers.get("x-show-id") || "show-main", clients: Object.keys(this.requireState().clients).length });
       }
