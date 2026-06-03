@@ -70,11 +70,6 @@ const SCREEN_TOPOLOGY = [
 const VJ_SCREEN_IDS = new Set<string>(["A1"]);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
-const EXTERNAL_SCREEN_ROUTE_PRESETS: Record<string, string> = {
-  checkin: "https://sign-rho-azure.vercel.app/",
-  gallery: "https://333d-main-read.vercel.app/",
-  echo: "https://review-zeta-seven.vercel.app/"
-};
 
 export function resolveWorkerRoomId(url: URL, fallbackShowId?: string | null) {
   return url.searchParams.get("room") || url.searchParams.get("showId") || fallbackShowId || "show-main";
@@ -84,6 +79,7 @@ export function sanitizeWorkerInteractionModulePatch(patch: JsonRecord) {
   const sanitized = { ...patch };
   delete sanitized.screenRoutes;
   delete sanitized.screenRoutePreset;
+  delete sanitized.customScreenRoutePresets;
   delete sanitized.screenPresentation;
   return sanitized;
 }
@@ -343,14 +339,16 @@ export class ShowRoomDurableObject {
           text: { value: "GAFA", animation: "Cinematic", reactive: 1, glow: 1, speed: 1, color: "#ffffff", fontSize: 4.6, fontWeight: 900, letterSpacing: 0.02 },
           audioDriveMode: "mic",
           fullscreen: false,
-          visualMemories: []
+          visualMemories: [],
+          visualScreens: createDefaultVisualScreens()
         },
         interaction: {
           status: "online",
           screenTopology: SCREEN_TOPOLOGY,
-          screenRegistry: SCREEN_IDS.map((id, index) => ({ id, label: `Screen ${id}`, enabled: true, physicalIndex: index + 1 })),
+          screenRegistry: createDefaultScreenRegistry(),
           screenRoutes: makeScreenRoutes("balanced", now, "", this.env),
           screenRoutePreset: "balanced",
+          customScreenRoutePresets: [],
           screenPresentation: { autoRedirect: true, cameraEnabled: false, showDebug: false, showMenu: false, configured: false },
           screenId: "C2",
           role: "screen",
@@ -538,6 +536,86 @@ function isActiveAudioPublisher(client: ClientInfo) {
   return client.module === "audio" &&
     client.status === "online" &&
     (client.role === "dj" || client.capabilities.includes("mixer.audioFrame"));
+}
+
+function normalizeStoredState(state: PerformanceState): PerformanceState {
+  return {
+    ...state,
+    modules: {
+      ...state.modules,
+      visual: {
+        ...state.modules.visual,
+        visualScreens: normalizeVisualScreens(state.modules.visual.visualScreens)
+      },
+      interaction: {
+        ...state.modules.interaction,
+        screenRegistry: normalizeScreenRegistry(state.modules.interaction.screenRegistry),
+        customScreenRoutePresets: Array.isArray(state.modules.interaction.customScreenRoutePresets)
+          ? state.modules.interaction.customScreenRoutePresets
+          : []
+      }
+    }
+  };
+}
+
+function createDefaultScreenRegistry() {
+  return SCREEN_IDS.map((id, index) => ({
+    id,
+    label: `Screen ${id}`,
+    enabled: true,
+    physicalIndex: index + 1
+  }));
+}
+
+function createDefaultVisualScreens(): PerformanceState["modules"]["visual"]["visualScreens"] {
+  return SCREEN_IDS.map((id, index) => ({
+    id,
+    name: `Show Screen ${id}`,
+    device: index === 0 ? "stage" : "led",
+    scene: index === 0 ? "Layered Stage" : index % 4 === 1 ? "Topology" : index % 4 === 2 ? "Pulse" : "Liquid",
+    enabled: true
+  }));
+}
+
+function normalizeScreenRegistry(value: unknown) {
+  if (!Array.isArray(value)) return createDefaultScreenRegistry();
+  const byId = new Map<string, unknown>(value.map((item) => {
+    const record = isRecord(item) ? item : {};
+    return [String(record.id || ""), record];
+  }));
+  return SCREEN_IDS.map((id, index) => {
+    const record = isRecord(byId.get(id)) ? byId.get(id) as JsonRecord : {};
+    return {
+      id,
+      label: String(record.label || `Screen ${id}`),
+      enabled: typeof record.enabled === "boolean" ? record.enabled : true,
+      physicalIndex: Math.max(1, Math.round(positiveNumber(record.physicalIndex, index + 1)))
+    };
+  });
+}
+
+function normalizeVisualScreens(value: unknown): PerformanceState["modules"]["visual"]["visualScreens"] {
+  const defaults = createDefaultVisualScreens();
+  const byId = new Map<string, unknown>(Array.isArray(value) ? value.map((item) => {
+    const record = isRecord(item) ? item : {};
+    return [String(record.id || ""), record];
+  }) : []);
+  return defaults.map((screen) => {
+    const record = isRecord(byId.get(screen.id)) ? byId.get(screen.id) as JsonRecord : {};
+    return {
+      id: screen.id,
+      name: String(record.name || screen.name),
+      device: normalizeVisualDevice(record.device) || screen.device,
+      scene: String(record.scene || screen.scene),
+      enabled: typeof record.enabled === "boolean" ? record.enabled : screen.enabled
+    };
+  });
+}
+
+function normalizeVisualDevice(value: unknown): PerformanceState["modules"]["visual"]["visualScreens"][number]["device"] | null {
+  return ["stage", "projector", "led", "tablet", "phone"].includes(String(value))
+    ? String(value) as PerformanceState["modules"]["visual"]["visualScreens"][number]["device"]
+    : null;
 }
 
 function applyCommand(state: PerformanceState, command: ControlCommand, env: Env) {
@@ -736,24 +814,7 @@ function makeScreenRoutes(preset: ScreenRoutePreset, updatedAt: number, origin: 
 }
 
 function makeScreenRouteForPreset(screenId: string, preset: ScreenRoutePreset, updatedAt: number, source: string, origin: string, env: Env, room?: string | null) {
-  const externalUrl = EXTERNAL_SCREEN_ROUTE_PRESETS[String(preset)];
-  if (externalUrl) {
-    return {
-      screenId,
-      owner: "external" as ScreenOwner,
-      url: resolveExternalScreenRouteUrl(externalUrl, screenId, room),
-      updatedAt,
-      source
-    };
-  }
   return makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, source, origin, env, room);
-}
-
-function resolveExternalScreenRouteUrl(value: string, screenId: string, room?: string | null) {
-  const url = new URL(value);
-  url.searchParams.set("screenId", screenId);
-  if (room && room !== "show-main") url.searchParams.set("room", room);
-  return url.toString();
 }
 
 function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number, source: string, origin: string, env: Env, room?: string | null) {
@@ -851,7 +912,7 @@ function appendEvent(state: PerformanceState, type: string, module: string | und
 }
 
 function normalizeScreenOwner(value: unknown): ScreenOwner | null {
-  return ["vj", "baofa", "off", "diagnostic", "external"].includes(String(value)) ? String(value) as ScreenOwner : null;
+  return ["vj", "baofa", "off", "diagnostic"].includes(String(value)) ? String(value) as ScreenOwner : null;
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {

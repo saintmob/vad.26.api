@@ -41,11 +41,6 @@ const SCREEN_TOPOLOGY = [
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
 const BUILT_IN_SCREEN_ROUTE_PRESETS: BuiltInScreenRoutePreset[] = ["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"];
-const EXTERNAL_SCREEN_ROUTE_PRESETS: Partial<Record<BuiltInScreenRoutePreset, string>> = {
-  checkin: "https://sign-rho-azure.vercel.app/",
-  gallery: "https://333d-main-read.vercel.app/",
-  echo: "https://review-zeta-seven.vercel.app/"
-};
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 const VISUAL_SCENE_PRESETS: Record<string, string> = {
@@ -851,12 +846,7 @@ function createDefaultVisualScreens(): VisualScreenState[] {
 
 function createScreenRoutesForPreset(preset: ScreenRoutePreset, now: number): Record<string, ScreenRouteEntry> {
   const routes: Record<string, ScreenRouteEntry> = {};
-  const externalUrl = isBuiltInScreenRoutePreset(preset) ? EXTERNAL_SCREEN_ROUTE_PRESETS[preset] : undefined;
   for (const screenId of SCREEN_IDS) {
-    if (externalUrl) {
-      routes[screenId] = makeExternalScreenRoute(screenId, preset, externalUrl, now, "preset");
-      continue;
-    }
     const owner = ownerForPreset(screenId, preset);
     routes[screenId] = makeScreenRoute(screenId, owner, now, "preset");
   }
@@ -877,23 +867,6 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
     updatedAt,
     source
   };
-}
-
-function makeExternalScreenRoute(screenId: string, preset: ScreenRoutePreset, url: string, updatedAt: number, source?: string): ScreenRouteEntry {
-  return {
-    screenId,
-    owner: "external",
-    url: resolveExternalScreenRouteUrl(url, screenId),
-    updatedAt,
-    source: source || preset
-  };
-}
-
-function resolveExternalScreenRouteUrl(value: string, screenId: string, room?: string | null) {
-  const url = new URL(value);
-  url.searchParams.set("screenId", screenId);
-  if (room && room !== "show-main") url.searchParams.set("room", room);
-  return url.toString();
 }
 
 export function resolveScreenRouteUrl(origin: string | null | undefined, owner: ScreenOwner, screenId: string, room?: string | null) {
@@ -935,7 +908,7 @@ export function resolveStateScreenRoutes(state: PerformanceState, origin: string
       ...route,
       screenId,
       owner,
-      url: owner === "external" ? route.url || null : resolveScreenRouteUrl(origin, owner, screenId, room),
+      url: resolveScreenRouteUrl(origin, owner, screenId, room),
       updatedAt: positiveNumber(route?.updatedAt, Date.now())
     };
   }
@@ -1033,7 +1006,7 @@ function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
       ...existing,
       screenId,
       owner,
-      url: owner === "external" ? String(existing.url || defaults[screenId].url || "") || null : resolveScreenRouteUrl(CONFIGURED_SCREEN_ROUTE_ORIGIN, owner, screenId),
+      url: resolveScreenRouteUrl(CONFIGURED_SCREEN_ROUTE_ORIGIN, owner, screenId),
       updatedAt: positiveNumber(existing.updatedAt, defaults[screenId].updatedAt)
     };
   }
@@ -1041,7 +1014,7 @@ function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
 }
 
 function normalizeScreenOwner(value: unknown): ScreenOwner | null {
-  return ["vj", "baofa", "off", "diagnostic", "external"].includes(String(value)) ? String(value) as ScreenOwner : null;
+  return ["vj", "baofa", "off", "diagnostic"].includes(String(value)) ? String(value) as ScreenOwner : null;
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {

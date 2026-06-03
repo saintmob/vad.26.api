@@ -19,11 +19,6 @@ const databaseUrl = String(env.VITE_FIREBASE_DATABASE_URL || "").replace(/\/$/, 
 const lanHost = String(env.VITE_LAN_HOST || env.SHOW_LAN_HOST || "").trim();
 const hostedVjScreenOrigin = "https://doit-pearl.vercel.app";
 const hostedBaofaScreenOrigin = "https://baofa.vercel.app";
-const externalScreenRoutePresets: Record<string, string> = {
-  checkin: "https://sign-rho-azure.vercel.app/",
-  gallery: "https://333d-main-read.vercel.app/",
-  echo: "https://review-zeta-seven.vercel.app/"
-};
 const visualScenePresets: Record<string, string> = {
   "Video Flow": "Video Flow",
   "Layered Stage": "Layered Stage",
@@ -49,12 +44,11 @@ export function shouldUseFirebaseRealtime() {
     const requestedTransport = params.get("transport");
     if (requestedTransport === "firebase") return true;
     if (requestedTransport === "cloudflare" || requestedTransport === "websocket") return false;
-    if (isPublicRuntime()) return false;
   }
   const transport = env.VITE_SHOW_TRANSPORT || "auto";
   if (transport === "firebase") return true;
   if (transport === "websocket" || transport === "cloudflare") return false;
-  return isFirebaseRealtimeConfigured && window.location.hostname.endsWith("vercel.app");
+  return false;
 }
 
 function getBrowserHost() {
@@ -80,10 +74,6 @@ function isLanRuntime() {
     /^192\.168\./.test(host) ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
   );
-}
-
-function isPublicRuntime() {
-  return !isLanRuntime();
 }
 
 function resolveScreenOrigin(owner: ScreenOwner) {
@@ -409,7 +399,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
         } else if (["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(preset)) {
           patch["modules/interaction/screenRoutePreset"] = preset;
           for (const screenId of screenIds) {
-            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRouteForPreset(screenId, preset, now, "preset");
+            patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, ownerForPreset(screenId, preset), now, "preset");
           }
         }
       }
@@ -468,7 +458,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
 }
 
 function normalizeScreenOwner(value: unknown): ScreenOwner | null {
-  return ["vj", "baofa", "off", "diagnostic", "external"].includes(String(value)) ? String(value) as ScreenOwner : null;
+  return ["vj", "baofa", "off", "diagnostic"].includes(String(value)) ? String(value) as ScreenOwner : null;
 }
 
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
@@ -532,27 +522,6 @@ function makeScreenRoute(screenId: string, owner: ScreenOwner, updatedAt: number
     updatedAt,
     source
   };
-}
-
-function makeScreenRouteForPreset(screenId: string, preset: ScreenRoutePreset, updatedAt: number, source: string) {
-  const externalUrl = externalScreenRoutePresets[String(preset)];
-  if (externalUrl) {
-    return {
-      screenId,
-      owner: "external" as ScreenOwner,
-      url: resolveExternalScreenRouteUrl(externalUrl, screenId),
-      updatedAt,
-      source
-    };
-  }
-  return makeScreenRoute(screenId, ownerForPreset(screenId, preset), updatedAt, source);
-}
-
-function resolveExternalScreenRouteUrl(value: string, screenId: string) {
-  const url = new URL(value);
-  url.searchParams.set("screenId", screenId);
-  if (firebaseShowId && firebaseShowId !== "show-main") url.searchParams.set("room", firebaseShowId);
-  return url.toString();
 }
 
 function openStream(path: string, onRemoteChange: () => void | Promise<void>) {
