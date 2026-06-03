@@ -50,13 +50,6 @@ function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string)
   return url.toString().replace(/\/$/, "");
 }
 
-function expectedExternalScreenRouteUrl(baseUrl: string, screenId: string, room?: string) {
-  const url = new URL(baseUrl);
-  url.searchParams.set("screenId", screenId);
-  if (room && room !== "show-main") url.searchParams.set("room", room);
-  return url.toString();
-}
-
 test("serves API spec and initial state", async () => {
   await withServer(async (baseUrl) => {
     const spec = await fetch(`${baseUrl}/api/spec`).then((res) => res.json());
@@ -150,7 +143,7 @@ test("updates screen route preset and individual screen owners", async () => {
   });
 });
 
-test("applies external route presets and switches back to local modules", async () => {
+test("keeps built-in route presets on local module origins", async () => {
   await withServer(async (baseUrl) => {
     const checkinResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
@@ -167,10 +160,10 @@ test("applies external route presets and switches back to local modules", async 
 
     assert.equal(checkinResponse.status, 202);
     assert.equal(checkinBody.state.modules.interaction.screenRoutePreset, "checkin");
-    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.owner, "external");
-    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.url, expectedExternalScreenRouteUrl("https://sign-rho-azure.vercel.app/", "A1"));
-    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.owner, "external");
-    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.url, expectedExternalScreenRouteUrl("https://sign-rho-azure.vercel.app/", "R2"));
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.owner, "vj");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.url, expectedScreenRouteUrl(baseUrl, 4302, "A1"));
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.owner, "baofa");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.url, expectedScreenRouteUrl(baseUrl, 4303, "R2"));
 
     const baofaResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
