@@ -2702,12 +2702,6 @@ input::placeholder {
   background: color-mix(in srgb, var(--interaction) 10%, transparent);
 }
 
-.route-owner-badge.owner-external {
-  border-color: color-mix(in srgb, var(--brand) 48%, var(--border));
-  color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 10%, transparent);
-}
-
 .route-table span {
   margin-top: 1px;
   color: var(--text);
@@ -2928,19 +2922,6 @@ input::placeholder {
   background:
     radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--visual) 18%, transparent), transparent 32%),
     var(--bg);
-}
-
-.screen-gateway--external {
-  padding: 0;
-  background: #05070d;
-}
-
-.screen-gateway--external iframe {
-  width: 100vw;
-  height: 100vh;
-  display: block;
-  border: 0;
-  background: #05070d;
 }
 
 .screen-gateway-toolbar {

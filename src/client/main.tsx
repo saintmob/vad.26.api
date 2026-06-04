@@ -369,7 +369,6 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       baofa: "Baofa",
       off: "关闭",
       diagnostic: "诊断",
-      external: "外部",
       unset: "未设置"
     },
     interactionModes: {
@@ -522,7 +521,6 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
       baofa: "Baofa",
       off: "Off",
       diagnostic: "Diag",
-      external: "External",
       unset: "Unset"
     },
     interactionModes: {
@@ -2167,10 +2165,6 @@ function ScreenGateway({ screenId }: { screenId: string }) {
       setMessage(`Manual routing hold for ${formatOwner(route.owner)}`);
       return;
     }
-    if (routeTargetUrl && route.owner === "external") {
-      setMessage(`Showing ${screenId} external route`);
-      return;
-    }
     if (routeTargetUrl && route.owner !== "off" && route.owner !== "diagnostic") {
       setMessage(`Routing ${screenId} to ${formatOwner(route.owner)}`);
       window.location.replace(routeTargetUrl);
@@ -2180,18 +2174,7 @@ function ScreenGateway({ screenId }: { screenId: string }) {
   }, [route, routeTargetUrl, screenId, screenPresentation.autoRedirect, snapshot]);
 
   return (
-    <main className={route?.owner === "external" && routeTargetUrl && screenPresentation.autoRedirect ? "screen-gateway screen-gateway--external" : "screen-gateway"}>
-      {route?.owner === "external" && routeTargetUrl && screenPresentation.autoRedirect ? (
-        <>
-          {screenPresentation.showMenu && (
-            <div className="screen-gateway-toolbar">
-              <span>{screenId}</span>
-              <strong>{connection}</strong>
-            </div>
-          )}
-          <iframe title={`${screenId} external route`} src={routeTargetUrl} />
-        </>
-      ) : (
+    <main className="screen-gateway">
       <section>
         <div className={`connection-dot ${connection}`} />
         <span>{connection}</span>
@@ -2222,7 +2205,6 @@ function ScreenGateway({ screenId }: { screenId: string }) {
           </dl>
         )}
       </section>
-      )}
     </main>
   );
 }
@@ -2399,7 +2381,6 @@ function formatMs(value: number) {
 function formatOwner(owner: unknown) {
   if (owner === "vj") return "VJ";
   if (owner === "baofa") return "Baofa";
-  if (owner === "external") return "External";
   if (owner === "off") return "Off";
   if (owner === "diagnostic") return "Diag";
   return "Unset";

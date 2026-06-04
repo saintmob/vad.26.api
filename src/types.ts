@@ -4,7 +4,7 @@ export type ModuleName = (typeof MODULE_NAMES)[number];
 export type ModuleStatus = "offline" | "standby" | "online" | "live" | "error";
 export type ShowStatus = "standby" | "running" | "paused" | "ended";
 export type JsonRecord = Record<string, unknown>;
-export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic" | "external";
+export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic";
 export type BuiltInScreenRoutePreset = "balanced" | "checkin" | "gallery" | "vj_takeover" | "baofa_takeover" | "echo";
 export type ScreenRoutePreset = BuiltInScreenRoutePreset | string;
 
