@@ -6,7 +6,9 @@ import path from "node:path";
 import type http from "node:http";
 import WebSocket from "ws";
 import { createServer, loadLocalEnvFile, type CreateServerOptions } from "../src/server.js";
-import { resolveWorkerRoomId, sanitizeWorkerInteractionModulePatch } from "../src/cloudflare/worker.js";
+import { ShowRoomDurableObject, resolveWorkerRoomId, sanitizeWorkerInteractionModulePatch } from "../src/cloudflare/worker.js";
+import { createDefaultState } from "../src/state.js";
+import type { PerformanceState } from "../src/types.js";
 
 async function withServer(fn: (baseUrl: string, server: http.Server) => Promise<void>, options: CreateServerOptions = {}) {
   const autoAuth = options.controlToken === undefined;
@@ -48,6 +50,34 @@ function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string)
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function createWorkerRoom(initialState?: PerformanceState) {
+  const storage = new Map<string, unknown>();
+  if (initialState) storage.set("state", initialState);
+  let initialized = Promise.resolve();
+  const ctx = {
+    storage: {
+      get: async <T>(key: string) => storage.get(key) as T | undefined,
+      put: async <T>(key: string, value: T) => {
+        storage.set(key, value);
+      }
+    },
+    blockConcurrencyWhile: (callback: () => Promise<void>) => {
+      initialized = callback();
+    }
+  };
+  const env = {
+    CONTROL_TOKEN: "test-token",
+    DEFAULT_SHOW_ID: "show-main",
+    VJ_SCREEN_ORIGIN: "https://doit-pearl.vercel.app",
+    BAOFA_SCREEN_ORIGIN: "https://baofa.vercel.app"
+  };
+  return {
+    room: new ShowRoomDurableObject(ctx as never, env as never),
+    initialized,
+    storage
+  };
 }
 
 test("serves API spec and initial state", async () => {
@@ -326,6 +356,119 @@ test("cloudflare helpers isolate rooms and strip module-owned route controls", (
   });
 
   assert.deepEqual(sanitized, { mode: "flow", screenId: "B1" });
+});
+
+test("cloudflare durable object normalizes legacy stored screen state", async () => {
+  const legacyState = JSON.parse(JSON.stringify(createDefaultState())) as PerformanceState;
+  delete (legacyState.modules.visual as Partial<PerformanceState["modules"]["visual"]>).visualScreens;
+  delete (legacyState.modules.interaction as Partial<PerformanceState["modules"]["interaction"]>).screenRegistry;
+  delete (legacyState.modules.interaction as Partial<PerformanceState["modules"]["interaction"]>).customScreenRoutePresets;
+  legacyState.modules.interaction.screenRoutes = {
+    A1: {
+      screenId: "A1",
+      owner: "external" as never,
+      url: "https://external.example.test/?screenId=A1",
+      updatedAt: 1,
+      source: "legacy"
+    }
+  };
+
+  const { room, initialized, storage } = createWorkerRoom(legacyState);
+  await initialized;
+
+  const response = await room.fetch(new Request("https://worker.example/api/state?room=wan-main"));
+  const state = await response.json() as PerformanceState;
+  const storedState = storage.get("state") as PerformanceState;
+
+  assert.equal(response.status, 200);
+  assert.equal(state.modules.visual.visualScreens.length, 20);
+  assert.equal(state.modules.interaction.screenRegistry.length, 20);
+  assert.equal(state.modules.interaction.customScreenRoutePresets.length, 0);
+  assert.equal(state.modules.interaction.screenRoutes.A1.owner, "vj");
+  assert.equal(state.modules.interaction.screenRoutes.A1.url, "https://doit-pearl.vercel.app/screen/A1?room=wan-main");
+  assert.equal(storedState.modules.visual.visualScreens.length, 20);
+  assert.equal(storedState.modules.interaction.screenRegistry.length, 20);
+  assert.equal(storedState.modules.interaction.customScreenRoutePresets.length, 0);
+});
+
+test("cloudflare durable object saves, applies, and deletes custom screen route arrangements", async () => {
+  const { room, initialized } = createWorkerRoom();
+  await initialized;
+
+  const saveResponse = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "custom-route",
+      command: "saveScreenRouteArrangement",
+      value: {
+        id: "custom-worker-visual",
+        name: "Worker Visual",
+        routes: {
+          A1: "vj",
+          B1: "vj",
+          B2: "baofa"
+        },
+        vjScenes: {
+          A1: "Video Flow",
+          B1: "Dumbar"
+        }
+      },
+      issuedBy: "test"
+    })
+  }));
+  const saveBody = await saveResponse.json();
+
+  assert.equal(saveResponse.status, 202);
+  assert.equal(saveBody.state.modules.interaction.screenRoutePreset, "custom-worker-visual");
+  assert.equal(saveBody.state.modules.interaction.customScreenRoutePresets.length, 1);
+  assert.equal(saveBody.state.modules.interaction.screenRoutes.B1.owner, "vj");
+  assert.equal(saveBody.state.modules.visual.visualScreens.find((screen: { id: string }) => screen.id === "B1")?.scene, "Dumbar");
+
+  const applyResponse = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "custom-worker-visual",
+      command: "setScreenRoutePreset",
+      value: "custom-worker-visual",
+      issuedBy: "test"
+    })
+  }));
+  const applyBody = await applyResponse.json();
+
+  assert.equal(applyResponse.status, 202);
+  assert.equal(applyBody.state.modules.interaction.screenRoutes.B1.owner, "vj");
+  assert.equal(applyBody.state.modules.visual.visualScreens.find((screen: { id: string }) => screen.id === "B1")?.scene, "Dumbar");
+
+  const deleteResponse = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "custom-worker-visual",
+      command: "deleteScreenRouteArrangement",
+      value: "custom-worker-visual",
+      issuedBy: "test"
+    })
+  }));
+  const deleteBody = await deleteResponse.json();
+
+  assert.equal(deleteResponse.status, 202);
+  assert.equal(deleteBody.state.modules.interaction.customScreenRoutePresets.length, 0);
+  assert.equal(deleteBody.state.modules.interaction.screenRoutePreset, "balanced");
+  assert.equal(deleteBody.state.modules.interaction.screenRoutes.B1.owner, "baofa");
 });
 
 test("updates screen presentation controls", async () => {
