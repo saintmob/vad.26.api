@@ -107,6 +107,7 @@ const screenIds = [
 ];
 const balancedVjScreens = new Set(["A1"]);
 const takeoverVjScreens = new Set(screenIds);
+const builtInScreenRoutePresets = ["balanced", "vj_takeover", "baofa_takeover"];
 
 export function createFirebaseDashboardClient(options: DashboardClientOptions) {
   if (!isFirebaseRealtimeConfigured) {
@@ -396,7 +397,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
             if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/scene`] = scene;
             if (scene) patch[`modules/visual/visualScreens/${screenIds.indexOf(screenId)}/enabled`] = true;
           }
-        } else if (["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(preset)) {
+        } else if (builtInScreenRoutePresets.includes(preset)) {
           patch["modules/interaction/screenRoutePreset"] = preset;
           for (const screenId of screenIds) {
             patch[`modules/interaction/screenRoutes/${screenId}`] = makeScreenRoute(screenId, ownerForPreset(screenId, preset), now, "preset");
@@ -423,7 +424,7 @@ function commandToStatePatch(command: ControlCommand, currentState?: Performance
     }
     if (command.command === "deleteScreenRouteArrangement") {
       const presetId = String(value || command.target || "").trim();
-      if (presetId && !["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(presetId)) {
+      if (presetId && !builtInScreenRoutePresets.includes(presetId)) {
         const presets = (currentState?.modules.interaction.customScreenRoutePresets || []).filter((entry) => entry.id !== presetId);
         patch["modules/interaction/customScreenRoutePresets"] = presets;
         if (currentState?.modules.interaction.screenRoutePreset === presetId) {
@@ -469,7 +470,7 @@ function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
 function normalizeScreenRouteArrangement(value: unknown, now: number, currentState: PerformanceState | null) {
   if (!isRecord(value)) return null;
   const rawId = String(value.id || "").trim();
-  const id = rawId && !["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"].includes(rawId)
+  const id = rawId && !builtInScreenRoutePresets.includes(rawId)
     ? rawId
     : `custom-${createIdFragment()}`;
   const inputRoutes = isRecord(value.routes) ? value.routes : {};

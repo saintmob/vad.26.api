@@ -40,7 +40,7 @@ const SCREEN_TOPOLOGY = [
 
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
-const BUILT_IN_SCREEN_ROUTE_PRESETS: BuiltInScreenRoutePreset[] = ["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"];
+const BUILT_IN_SCREEN_ROUTE_PRESETS: BuiltInScreenRoutePreset[] = ["balanced", "vj_takeover", "baofa_takeover"];
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 const VISUAL_SCENE_PRESETS: Record<string, string> = {
@@ -730,8 +730,11 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
   state.modules.visual.visualScreens = normalizeVisualScreens(state.modules.visual.visualScreens);
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
-  state.modules.interaction.screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
   state.modules.interaction.customScreenRoutePresets = normalizeCustomScreenRoutePresets(state.modules.interaction.customScreenRoutePresets);
+  state.modules.interaction.screenRoutePreset = normalizeKnownScreenRoutePreset(
+    state.modules.interaction.screenRoutePreset,
+    state.modules.interaction.customScreenRoutePresets
+  );
   state.modules.interaction.screenPresentation = normalizeScreenPresentation(state.modules.interaction.screenPresentation);
   state.modules.interaction.screenId = normalizeScreenOccupancyId(state.modules.interaction.screenId) || state.modules.interaction.screenId;
   state.modules.interaction.role = ["MASTER", "A1"].includes(state.modules.interaction.screenId) ? "master" : "screen";
@@ -1020,6 +1023,13 @@ function normalizeScreenOwner(value: unknown): ScreenOwner | null {
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
   const preset = String(value || "").trim();
   return preset ? preset : null;
+}
+
+function normalizeKnownScreenRoutePreset(value: unknown, customPresets: ScreenRouteArrangementPreset[]): ScreenRoutePreset {
+  const preset = normalizeScreenRoutePreset(value);
+  if (!preset) return "balanced";
+  if (isBuiltInScreenRoutePreset(preset)) return preset;
+  return customPresets.some((entry) => entry.id === preset) ? preset : "balanced";
 }
 
 function isBuiltInScreenRoutePreset(value: ScreenRoutePreset): value is BuiltInScreenRoutePreset {

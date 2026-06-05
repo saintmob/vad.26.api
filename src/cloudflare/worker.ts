@@ -70,7 +70,7 @@ const SCREEN_TOPOLOGY = [
 const VJ_SCREEN_IDS = new Set<string>(["A1"]);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
-const BUILT_IN_SCREEN_ROUTE_PRESETS = ["balanced", "checkin", "gallery", "vj_takeover", "baofa_takeover", "echo"] as const;
+const BUILT_IN_SCREEN_ROUTE_PRESETS = ["balanced", "vj_takeover", "baofa_takeover"] as const;
 
 export function resolveWorkerRoomId(url: URL, fallbackShowId?: string | null) {
   return url.searchParams.get("room") || url.searchParams.get("showId") || fallbackShowId || "show-main";
@@ -541,8 +541,8 @@ function isActiveAudioPublisher(client: ClientInfo) {
 }
 
 function normalizeStoredState(state: PerformanceState, env: Env): PerformanceState {
-  const screenRoutePreset = normalizeScreenRoutePreset(state.modules.interaction.screenRoutePreset) || "balanced";
   const customScreenRoutePresets = normalizeCustomScreenRoutePresets(state.modules.interaction.customScreenRoutePresets);
+  const screenRoutePreset = normalizeKnownScreenRoutePreset(state.modules.interaction.screenRoutePreset, customScreenRoutePresets);
   return {
     ...state,
     modules: {
@@ -1033,6 +1033,13 @@ function normalizeScreenOwner(value: unknown): ScreenOwner | null {
 function normalizeScreenRoutePreset(value: unknown): ScreenRoutePreset | null {
   const preset = String(value || "").trim();
   return preset ? preset : null;
+}
+
+function normalizeKnownScreenRoutePreset(value: unknown, customPresets: ScreenRouteArrangementPreset[]): ScreenRoutePreset {
+  const preset = normalizeScreenRoutePreset(value);
+  if (!preset) return "balanced";
+  if (isBuiltInScreenRoutePreset(preset)) return preset;
+  return customPresets.some((entry) => entry.id === preset) ? preset : "balanced";
 }
 
 function isBuiltInScreenRoutePreset(value: ScreenRoutePreset): value is (typeof BUILT_IN_SCREEN_ROUTE_PRESETS)[number] {

@@ -5,7 +5,7 @@ export type ModuleStatus = "offline" | "standby" | "online" | "live" | "error";
 export type ShowStatus = "standby" | "running" | "paused" | "ended";
 export type JsonRecord = Record<string, unknown>;
 export type ScreenOwner = "vj" | "baofa" | "off" | "diagnostic";
-export type BuiltInScreenRoutePreset = "balanced" | "checkin" | "gallery" | "vj_takeover" | "baofa_takeover" | "echo";
+export type BuiltInScreenRoutePreset = "balanced" | "vj_takeover" | "baofa_takeover";
 export type ScreenRoutePreset = BuiltInScreenRoutePreset | string;
 
 export interface AudioFrame {
