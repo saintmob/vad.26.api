@@ -54,13 +54,16 @@ function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string)
 
 function createWorkerRoom(initialState?: PerformanceState) {
   const storage = new Map<string, unknown>();
-  if (initialState) storage.set("state", initialState);
+  if (initialState) storage.set("state", structuredClone(initialState));
   let initialized = Promise.resolve();
   const ctx = {
     storage: {
-      get: async <T>(key: string) => storage.get(key) as T | undefined,
+      get: async <T>(key: string) => {
+        const value = storage.get(key);
+        return value === undefined ? undefined : structuredClone(value) as T;
+      },
       put: async <T>(key: string, value: T) => {
-        storage.set(key, value);
+        storage.set(key, structuredClone(value));
       }
     },
     blockConcurrencyWhile: (callback: () => Promise<void>) => {
@@ -471,6 +474,114 @@ test("cloudflare durable object saves, applies, and deletes custom screen route 
   assert.equal(deleteBody.state.modules.interaction.customScreenRoutePresets.length, 0);
   assert.equal(deleteBody.state.modules.interaction.screenRoutePreset, "balanced");
   assert.equal(deleteBody.state.modules.interaction.screenRoutes.B1.owner, "baofa");
+});
+
+test("cloudflare durable object enforces operation lock", async () => {
+  const { room, initialized } = createWorkerRoom();
+  await initialized;
+
+  const rejectedLock = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "visual",
+      command: "setOperationLock",
+      value: { module: "visual", locked: true },
+      issuedBy: "vj"
+    })
+  }));
+  assert.equal(rejectedLock.status, 423);
+
+  const locked = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "visual",
+      command: "setOperationLock",
+      value: { module: "visual", locked: true },
+      issuedBy: "dashboard-main"
+    })
+  }));
+  const lockedBody = await locked.json();
+  assert.equal(locked.status, 202);
+  assert.deepEqual(lockedBody.state.operationLock.lockedModules, ["visual"]);
+
+  const rejectedCommand = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "visual",
+      target: "visual-main",
+      command: "setScene",
+      value: "Pulse",
+      issuedBy: "vj"
+    })
+  }));
+  const rejectedCommandBody = await rejectedCommand.json();
+  assert.equal(rejectedCommand.status, 423);
+  assert.equal(rejectedCommandBody.error, "Operation lock active");
+
+  const rejectedPatch = await room.fetch(new Request("https://worker.example/api/modules/visual/state?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      source: "vj",
+      patch: { scene: "Bypass" }
+    })
+  }));
+  assert.equal(rejectedPatch.status, 423);
+
+  const dashboardPatch = await room.fetch(new Request("https://worker.example/api/modules/visual/state?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      source: "dashboard-main",
+      patch: { scene: "Dashboard Bypass" }
+    })
+  }));
+  assert.equal(dashboardPatch.status, 202);
+});
+
+test("cloudflare durable object keeps high-frequency audio out of persisted snapshots", async () => {
+  const { room, initialized, storage } = createWorkerRoom();
+  await initialized;
+
+  const response = await room.fetch(new Request("https://worker.example/api/mixer/frame?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      type: "mixer.audioFrame",
+      sourceId: "dj-live",
+      displayName: "DJ Live",
+      level: 0.84
+    })
+  }));
+  const body = await response.json();
+  const storedState = storage.get("state") as PerformanceState;
+
+  assert.equal(response.status, 202);
+  assert.equal(body.state.audioSources["dj-live"].level, 0.84);
+  assert.equal(storedState.audioSources["dj-live"], undefined);
 });
 
 test("updates screen presentation controls", async () => {

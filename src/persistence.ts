@@ -27,7 +27,9 @@ export class SnapshotWriter {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.flush(state);
+      void this.flush(state).catch((error) => {
+        console.warn(`Could not write show snapshot to ${this.snapshotPath}:`, error);
+      });
     }, this.delayMs);
   }
 

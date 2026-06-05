@@ -47,7 +47,7 @@ type SyncMessage =
   | { type: "control.ack"; ok: true; command: ControlCommand }
   | ControlCommand
   | AudioFrame
-  | { type: "error"; error: string };
+  | { type: "error"; error: string; [key: string]: unknown };
 
 const SCREEN_IDS = [
   "A1",
@@ -191,13 +191,17 @@ export class ShowRoomDurableObject {
       }
       const frame = normalizeAudioFrame(message);
       this.applyAudioFrame(frame);
-      await this.persistState();
+      await this.persistState(false);
       this.broadcast(frame);
       return;
     }
     if (message.type === "module.statePatch") {
       const moduleName = String(message.module);
       if (!isModuleName(moduleName)) throw new Error("module.statePatch.module must be audio, visual, or interaction");
+      if (!this.canApplyModulePatch(moduleName, String(message.source || this.profiles.get(socket)?.id || "ws"))) {
+        this.send(socket, { type: "error", error: "Operation lock active", module: moduleName });
+        return;
+      }
       const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
       const sanitizedPatch = this.applyModulePatch(moduleName, patch, String(message.source || this.profiles.get(socket)?.id || "ws"));
       await this.persistState();
@@ -206,6 +210,10 @@ export class ShowRoomDurableObject {
     }
     if (message.type === "control.command") {
       const command = normalizeControlCommand(message);
+      if (!this.canApplyControlCommand(command)) {
+        this.send(socket, { type: "error", error: "Operation lock active", command });
+        return;
+      }
       this.applyControlCommand(command);
       await this.persistState();
       this.broadcastControlSync(command);
@@ -217,6 +225,7 @@ export class ShowRoomDurableObject {
   private async handleControl(request: Request) {
     await this.requireToken(request);
     const command = normalizeControlCommand(await request.json());
+    if (!this.canApplyControlCommand(command)) return json({ ok: false, error: "Operation lock active", state: this.getStateForRequest(request) }, 423);
     this.applyControlCommand(command);
     await this.persistState();
     this.broadcastControlSync(command);
@@ -238,7 +247,9 @@ export class ShowRoomDurableObject {
     if (!isModuleName(moduleName)) return json({ ok: false, error: "module must be audio, visual, or interaction" }, 400);
     const body = await request.json() as JsonRecord;
     const patch = isRecord(body.patch) ? body.patch : body;
-    const sanitizedPatch = this.applyModulePatch(moduleName, patch, String(body.source || "rest"));
+    const source = String(body.source || "rest");
+    if (!this.canApplyModulePatch(moduleName, source)) return json({ ok: false, error: "Operation lock active", state: this.getStateForRequest(request) }, 423);
+    const sanitizedPatch = this.applyModulePatch(moduleName, patch, source);
     await this.persistState();
     this.broadcast({ type: "state.patch", module: moduleName, patch: sanitizedPatch, updatedAt: this.requireState().updatedAt });
     return json({ ok: true, module: moduleName, patch: sanitizedPatch, state: this.getStateForRequest(request) }, 202);
@@ -259,7 +270,11 @@ export class ShowRoomDurableObject {
   }
 
   private send(socket: WebSocket, message: SyncMessage) {
-    socket.send(JSON.stringify(message));
+    try {
+      socket.send(JSON.stringify(message));
+    } catch {
+      void this.removeSocket(socket);
+    }
   }
 
   private async removeSocket(socket: WebSocket) {
@@ -532,6 +547,19 @@ export class ShowRoomDurableObject {
     if (!configuredDj) return true;
     return request.headers.get("x-dj-client-id") === configuredDj || new URL(request.url).searchParams.get("djClientId") === configuredDj;
   }
+
+  private canApplyControlCommand(command: ControlCommand) {
+    if (command.command === "setOperationLock") return isCentralControlSource(command.issuedBy);
+    if (isCentralControlSource(command.issuedBy)) return true;
+    const moduleName = normalizeLockModule(command.module);
+    if (!moduleName) return true;
+    return !this.requireState().operationLock.lockedModules.includes(moduleName);
+  }
+
+  private canApplyModulePatch(moduleName: ModuleName, source: string) {
+    if (isCentralControlSource(source)) return true;
+    return !this.requireState().operationLock.lockedModules.includes(moduleName);
+  }
 }
 
 function isActiveAudioPublisher(client: ClientInfo) {
@@ -543,8 +571,14 @@ function isActiveAudioPublisher(client: ClientInfo) {
 function normalizeStoredState(state: PerformanceState, env: Env): PerformanceState {
   const customScreenRoutePresets = normalizeCustomScreenRoutePresets(state.modules.interaction.customScreenRoutePresets);
   const screenRoutePreset = normalizeKnownScreenRoutePreset(state.modules.interaction.screenRoutePreset, customScreenRoutePresets);
+  const lockedModules = normalizeLockedModules(state.operationLock.lockedModules || (state.operationLock.locked ? ["audio", "visual", "interaction"] : []));
   return {
     ...state,
+    operationLock: {
+      ...state.operationLock,
+      lockedModules,
+      locked: lockedModules.length > 0
+    },
     modules: {
       ...state.modules,
       visual: {
@@ -760,6 +794,16 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
     if (command.command === "setFx" && isRecord(value)) mergePatch(state.modules.visual.fx as unknown as JsonRecord, value);
   }
   if (command.module === "interaction") {
+    if (command.command === "setOperationLock") {
+      const lockedModules = nextLockedModules(state.operationLock.lockedModules, command.target, value);
+      state.operationLock = {
+        locked: lockedModules.length > 0,
+        lockedModules,
+        ownerModule: "dashboard",
+        lockedBy: command.issuedBy,
+        updatedAt: Date.now()
+      };
+    }
     if (["setInteractionMode", "setMode"].includes(command.command)) {
       state.modules.interaction.mode = String(value || command.target) as PerformanceState["modules"]["interaction"]["mode"];
       state.modules.interaction.visualMode = "tree";
@@ -978,7 +1022,7 @@ function normalizeControlCommand(input: unknown): ControlCommand {
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setStyle", "shuffleStyle", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx", "focusVideo"].includes(command)) return "visual";
-  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "saveScreenRouteArrangement", "deleteScreenRouteArrangement", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation"].includes(command)) return "interaction";
+  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "saveScreenRouteArrangement", "deleteScreenRouteArrangement", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation", "setOperationLock"].includes(command)) return "interaction";
   return "show";
 }
 
@@ -1019,6 +1063,41 @@ function normalizeStringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.map((entry) => typeof entry === "string" ? entry : "").filter(Boolean)
     : [];
+}
+
+function isCentralControlSource(source: unknown): boolean {
+  const normalized = String(source || "").toLowerCase();
+  return normalized.includes("dashboard") || normalized.includes("central") || normalized.includes("control-room") || normalized.includes("中控");
+}
+
+function normalizeLockModule(value: unknown): ModuleName | null {
+  if (value === "video") return "visual";
+  return isModuleName(value) ? value : null;
+}
+
+function normalizeLockedModules(value: unknown): ModuleName[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map(normalizeLockModule).filter((item): item is ModuleName => Boolean(item))));
+}
+
+function nextLockedModules(current: ModuleName[], target: string, value: unknown): ModuleName[] {
+  const lockedModules = new Set(normalizeLockedModules(current));
+  const record = isRecord(value) ? value : {};
+  const modulesValue = Array.isArray(record.modules) ? record.modules : undefined;
+  const moduleValue = normalizeLockModule(record.module || target);
+  const modules = modulesValue
+    ? modulesValue.map(normalizeLockModule).filter((item): item is ModuleName => Boolean(item))
+    : moduleValue
+      ? [moduleValue]
+      : ["audio", "visual", "interaction"] as ModuleName[];
+  const shouldLock = typeof record.locked === "boolean" ? record.locked : Boolean(value);
+
+  for (const moduleName of modules) {
+    if (shouldLock) lockedModules.add(moduleName);
+    else lockedModules.delete(moduleName);
+  }
+
+  return [...lockedModules];
 }
 
 function appendEvent(state: PerformanceState, type: string, module: string | undefined, source: string | undefined, message: string, payload?: unknown) {

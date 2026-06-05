@@ -251,8 +251,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     });
     sseOrigins.set(res, origin);
     hub.addSse(res);
-    res.write("event: state.snapshot\n");
-    res.write(`data: ${JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) })}\n\n`);
+    hub.sendSse(res, "state.snapshot", JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) }));
   });
 
   app.post("/api/mixer/frame", requireToken(options), (req, res) => {
@@ -641,8 +640,7 @@ function broadcastSyncMessage(
   });
   hub.forEachSseClient((client) => {
     const payload = JSON.stringify(message);
-    client.write(`event: ${message.type}\n`);
-    client.write(`data: ${payload}\n\n`);
+    hub.sendSse(client, message.type, payload);
   });
 }
 
@@ -706,8 +704,7 @@ function broadcastSnapshot(
   });
   hub.forEachSseClient((client) => {
     const clientOrigin = sseOrigins.get(client) || origin;
-    client.write("event: state.snapshot\n");
-    client.write(`data: ${JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), clientOrigin) })}\n\n`);
+    hub.sendSse(client, "state.snapshot", JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), clientOrigin) }));
   });
 }
 
