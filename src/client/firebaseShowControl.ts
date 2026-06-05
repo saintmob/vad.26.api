@@ -39,15 +39,6 @@ export const firebaseShowId = resolveShowId();
 export const isFirebaseRealtimeConfigured = Boolean(databaseUrl);
 
 export function shouldUseFirebaseRealtime() {
-  if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    const requestedTransport = params.get("transport");
-    if (requestedTransport === "firebase") return true;
-    if (requestedTransport === "cloudflare" || requestedTransport === "websocket") return false;
-  }
-  const transport = env.VITE_SHOW_TRANSPORT || "auto";
-  if (transport === "firebase") return true;
-  if (transport === "websocket" || transport === "cloudflare") return false;
   return false;
 }
 
