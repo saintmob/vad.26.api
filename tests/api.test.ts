@@ -173,7 +173,7 @@ test("updates screen route preset and individual screen owners", async () => {
   });
 });
 
-test("keeps built-in route presets on local module origins", async () => {
+test("keeps active built-in route presets on local module origins and ignores retired presets", async () => {
   await withServer(async (baseUrl) => {
     const checkinResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
@@ -189,7 +189,7 @@ test("keeps built-in route presets on local module origins", async () => {
     const checkinBody = await checkinResponse.json();
 
     assert.equal(checkinResponse.status, 202);
-    assert.equal(checkinBody.state.modules.interaction.screenRoutePreset, "checkin");
+    assert.equal(checkinBody.state.modules.interaction.screenRoutePreset, "balanced");
     assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.owner, "vj");
     assert.equal(checkinBody.state.modules.interaction.screenRoutes.A1.url, expectedScreenRouteUrl(baseUrl, 4302, "A1"));
     assert.equal(checkinBody.state.modules.interaction.screenRoutes.R2.owner, "baofa");
@@ -363,6 +363,7 @@ test("cloudflare durable object normalizes legacy stored screen state", async ()
   delete (legacyState.modules.visual as Partial<PerformanceState["modules"]["visual"]>).visualScreens;
   delete (legacyState.modules.interaction as Partial<PerformanceState["modules"]["interaction"]>).screenRegistry;
   delete (legacyState.modules.interaction as Partial<PerformanceState["modules"]["interaction"]>).customScreenRoutePresets;
+  legacyState.modules.interaction.screenRoutePreset = "checkin";
   legacyState.modules.interaction.screenRoutes = {
     A1: {
       screenId: "A1",
@@ -384,6 +385,7 @@ test("cloudflare durable object normalizes legacy stored screen state", async ()
   assert.equal(state.modules.visual.visualScreens.length, 20);
   assert.equal(state.modules.interaction.screenRegistry.length, 20);
   assert.equal(state.modules.interaction.customScreenRoutePresets.length, 0);
+  assert.equal(state.modules.interaction.screenRoutePreset, "balanced");
   assert.equal(state.modules.interaction.screenRoutes.A1.owner, "vj");
   assert.equal(state.modules.interaction.screenRoutes.A1.url, "https://doit-pearl.vercel.app/screen/A1?room=wan-main");
   assert.equal(storedState.modules.visual.visualScreens.length, 20);

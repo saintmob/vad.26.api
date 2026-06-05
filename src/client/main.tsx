@@ -218,11 +218,9 @@ const screenSelectionModes: Array<{ id: ScreenSelectionMode; label: string }> = 
 ];
 const sequenceSteps: SequenceStep[] = ["1/16", "1/8", "1/4", "1/2", "1"];
 const screenRoutePresets: Array<{ value: ScreenRoutePreset; label: string }> = [
-  { value: "checkin", label: "1. Check-in" },
-  { value: "gallery", label: "2. Gallery" },
-  { value: "vj_takeover", label: "3. VJ" },
-  { value: "baofa_takeover", label: "4. Baofa" },
-  { value: "echo", label: "5. Echo" }
+  { value: "balanced", label: "Balanced" },
+  { value: "vj_takeover", label: "All VJ" },
+  { value: "baofa_takeover", label: "All Baofa" }
 ];
 const screenOwners: Array<{ value: ScreenOwner; label: string }> = [
   { value: "vj", label: "VJ" },
@@ -358,11 +356,8 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     },
     screenRoutePresets: {
       balanced: "平衡",
-      checkin: "1.签到",
-      gallery: "2.展馆",
-      vj_takeover: "3.VJ",
-      baofa_takeover: "4.baofa",
-      echo: "5.回响"
+      vj_takeover: "全 VJ",
+      baofa_takeover: "全 Baofa"
     },
     screenOwners: {
       vj: "VJ",
@@ -510,11 +505,8 @@ const uiCopy: Record<UiLanguage, UiCopy> = {
     },
     screenRoutePresets: {
       balanced: "Balanced",
-      checkin: "1.Check-in",
-      gallery: "2.Gallery",
-      vj_takeover: "3.VJ",
-      baofa_takeover: "4.Baofa",
-      echo: "5.Echo"
+      vj_takeover: "All VJ",
+      baofa_takeover: "All Baofa"
     },
     screenOwners: {
       vj: "VJ",
