@@ -71,6 +71,7 @@ const VJ_SCREEN_IDS = new Set<string>(["A1"]);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
 const BUILT_IN_SCREEN_ROUTE_PRESETS = ["balanced", "vj_takeover", "baofa_takeover"] as const;
+const VISUAL_AUTHORITY_FALLBACK_MS = 15_000;
 
 export function resolveWorkerRoomId(url: URL, fallbackShowId?: string | null) {
   return url.searchParams.get("room") || url.searchParams.get("showId") || fallbackShowId || "show-main";
@@ -198,8 +199,9 @@ export class ShowRoomDurableObject {
     if (message.type === "module.statePatch") {
       const moduleName = String(message.module);
       if (!isModuleName(moduleName)) throw new Error("module.statePatch.module must be audio, visual, or interaction");
-      if (!this.canApplyModulePatch(moduleName, String(message.source || this.profiles.get(socket)?.id || "ws"))) {
-        this.send(socket, { type: "error", error: "Operation lock active", module: moduleName });
+      const blockReason = this.getModulePatchBlockReason(moduleName, String(message.source || this.profiles.get(socket)?.id || "ws"));
+      if (blockReason) {
+        this.send(socket, { type: "error", error: blockReason, module: moduleName });
         return;
       }
       const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
@@ -210,8 +212,9 @@ export class ShowRoomDurableObject {
     }
     if (message.type === "control.command") {
       const command = normalizeControlCommand(message);
-      if (!this.canApplyControlCommand(command)) {
-        this.send(socket, { type: "error", error: "Operation lock active", command });
+      const blockReason = this.getControlCommandBlockReason(command);
+      if (blockReason) {
+        this.send(socket, { type: "error", error: blockReason, command });
         return;
       }
       this.applyControlCommand(command);
@@ -225,7 +228,8 @@ export class ShowRoomDurableObject {
   private async handleControl(request: Request) {
     await this.requireToken(request);
     const command = normalizeControlCommand(await request.json());
-    if (!this.canApplyControlCommand(command)) return json({ ok: false, error: "Operation lock active", state: this.getStateForRequest(request) }, 423);
+    const blockReason = this.getControlCommandBlockReason(command);
+    if (blockReason) return json({ ok: false, error: blockReason, state: this.getStateForRequest(request) }, blockReason === "VJ control active" ? 409 : 423);
     this.applyControlCommand(command);
     await this.persistState();
     this.broadcastControlSync(command);
@@ -248,7 +252,8 @@ export class ShowRoomDurableObject {
     const body = await request.json() as JsonRecord;
     const patch = isRecord(body.patch) ? body.patch : body;
     const source = String(body.source || "rest");
-    if (!this.canApplyModulePatch(moduleName, source)) return json({ ok: false, error: "Operation lock active", state: this.getStateForRequest(request) }, 423);
+    const blockReason = this.getModulePatchBlockReason(moduleName, source);
+    if (blockReason) return json({ ok: false, error: blockReason, state: this.getStateForRequest(request) }, blockReason === "VJ control active" ? 409 : 423);
     const sanitizedPatch = this.applyModulePatch(moduleName, patch, source);
     await this.persistState();
     this.broadcast({ type: "state.patch", module: moduleName, patch: sanitizedPatch, updatedAt: this.requireState().updatedAt });
@@ -349,6 +354,7 @@ export class ShowRoomDurableObject {
         },
         visual: {
           status: "online",
+          controlAuthority: createDefaultVisualControlAuthority(),
           scene: "Cyber",
           preset: "Neon Pulse",
           colors: { base: "#00f3ff", secondary: "#bf00ff", accent: "#ffffff", background: "#030008" },
@@ -450,6 +456,7 @@ export class ShowRoomDurableObject {
     const state = this.requireState();
     const sanitizedPatch = moduleName === "interaction" ? sanitizeWorkerInteractionModulePatch(patch) : patch;
     mergePatch(state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
+    if (moduleName === "visual" && isVjVisualSource(source)) markVisualAuthorityFromVj(state, source);
     if (moduleName === "audio" && typeof sanitizedPatch.bpm === "number") state.show.bpm = positiveNumber(sanitizedPatch.bpm, state.show.bpm);
     if (moduleName === "audio") {
       if (typeof sanitizedPatch.activeStyleId === "string" && sanitizedPatch.activeStyleId) {
@@ -474,6 +481,10 @@ export class ShowRoomDurableObject {
   private applyControlCommand(command: ControlCommand) {
     const state = this.requireState();
     applyCommand(state, command, this.env);
+    if (command.module === "visual" || command.module === "video") {
+      if (isVjVisualSource(command.issuedBy)) markVisualAuthorityFromVj(state, command.issuedBy);
+      else markVisualAuthorityFromShowControl(state, command.issuedBy);
+    }
     state.commandLog.unshift(command);
     state.commandLog = state.commandLog.slice(0, 80);
     state.updatedAt = Date.now();
@@ -548,17 +559,18 @@ export class ShowRoomDurableObject {
     return request.headers.get("x-dj-client-id") === configuredDj || new URL(request.url).searchParams.get("djClientId") === configuredDj;
   }
 
-  private canApplyControlCommand(command: ControlCommand) {
-    if (command.command === "setOperationLock") return isCentralControlSource(command.issuedBy);
-    if (isCentralControlSource(command.issuedBy)) return true;
+  private getControlCommandBlockReason(command: ControlCommand) {
+    if (command.command === "setOperationLock") return isCentralControlSource(command.issuedBy) ? null : "Operation lock active";
     const moduleName = normalizeLockModule(command.module);
-    if (!moduleName) return true;
-    return !this.requireState().operationLock.lockedModules.includes(moduleName);
+    if (!isCentralControlSource(command.issuedBy) && moduleName && this.requireState().operationLock.lockedModules.includes(moduleName)) return "Operation lock active";
+    if ((command.module === "visual" || command.module === "video") && shouldDeferVisualControlToVj(this.requireState(), command.issuedBy)) return "VJ control active";
+    return null;
   }
 
-  private canApplyModulePatch(moduleName: ModuleName, source: string) {
-    if (isCentralControlSource(source)) return true;
-    return !this.requireState().operationLock.lockedModules.includes(moduleName);
+  private getModulePatchBlockReason(moduleName: ModuleName, source: string) {
+    if (!isCentralControlSource(source) && this.requireState().operationLock.lockedModules.includes(moduleName)) return "Operation lock active";
+    if (moduleName === "visual" && shouldDeferVisualControlToVj(this.requireState(), source)) return "VJ control active";
+    return null;
   }
 }
 
@@ -583,6 +595,7 @@ function normalizeStoredState(state: PerformanceState, env: Env): PerformanceSta
       ...state.modules,
       visual: {
         ...state.modules.visual,
+        controlAuthority: normalizeVisualControlAuthority(state.modules.visual.controlAuthority),
         visualScreens: normalizeVisualScreens(state.modules.visual.visualScreens)
       },
       interaction: {
@@ -613,6 +626,16 @@ function createDefaultVisualScreens(): PerformanceState["modules"]["visual"]["vi
     scene: index === 0 ? "Layered Stage" : index % 4 === 1 ? "Topology" : index % 4 === 2 ? "Pulse" : "Liquid",
     enabled: true
   }));
+}
+
+function createDefaultVisualControlAuthority(): PerformanceState["modules"]["visual"]["controlAuthority"] {
+  return {
+    owner: "show-control",
+    source: null,
+    lastVjAt: null,
+    activeUntil: null,
+    fallbackAfterMs: VISUAL_AUTHORITY_FALLBACK_MS
+  };
 }
 
 function normalizeScreenRegistry(value: unknown) {
@@ -726,7 +749,13 @@ function normalizeVisualScene(value: unknown): string | null {
   return scene ? scene : null;
 }
 
-function applyScreenRouteArrangement(state: PerformanceState, preset: ScreenRouteArrangementPreset, now: number, env: Env) {
+function applyScreenRouteArrangement(
+  state: PerformanceState,
+  preset: ScreenRouteArrangementPreset,
+  now: number,
+  env: Env,
+  options: { applyVisualScenes?: boolean } = {}
+) {
   const routes: PerformanceState["modules"]["interaction"]["screenRoutes"] = {};
   for (const screenId of SCREEN_IDS) {
     const owner = normalizeScreenOwner(preset.routes[screenId]) || "baofa";
@@ -734,6 +763,7 @@ function applyScreenRouteArrangement(state: PerformanceState, preset: ScreenRout
   }
   state.modules.interaction.screenRoutePreset = preset.id;
   state.modules.interaction.screenRoutes = routes;
+  if (options.applyVisualScenes === false) return;
   state.modules.visual.visualScreens = normalizeVisualScreens(
     state.modules.visual.visualScreens.map((screen) => {
       const scene = preset.vjScenes[screen.id];
@@ -854,7 +884,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       const preset = normalizeScreenRoutePreset(value || command.target);
       if (preset) {
         const customPreset = state.modules.interaction.customScreenRoutePresets.find((entry) => entry.id === preset);
-        if (customPreset) applyScreenRouteArrangement(state, customPreset, Date.now(), env);
+        if (customPreset) applyScreenRouteArrangement(state, customPreset, Date.now(), env, { applyVisualScenes: !isVisualAuthorityActive(state) });
         else if (isBuiltInScreenRoutePreset(preset)) {
           state.modules.interaction.screenRoutePreset = preset;
           state.modules.interaction.screenRoutes = makeScreenRoutes(preset, Date.now(), "", env);
@@ -869,7 +899,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
           ...state.modules.interaction.customScreenRoutePresets.filter((entry) => entry.id !== preset.id),
           preset
         ];
-        applyScreenRouteArrangement(state, preset, now, env);
+        applyScreenRouteArrangement(state, preset, now, env, { applyVisualScenes: !isVisualAuthorityActive(state) });
       }
     }
     if (command.command === "deleteScreenRouteArrangement") {
@@ -1070,9 +1100,63 @@ function isCentralControlSource(source: unknown): boolean {
   return normalized.includes("dashboard") || normalized.includes("central") || normalized.includes("control-room") || normalized.includes("中控");
 }
 
+function isVjVisualSource(source: unknown): boolean {
+  const normalized = String(source || "").toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("vj") || normalized.includes("visual") || normalized.includes("4302");
+}
+
 function normalizeLockModule(value: unknown): ModuleName | null {
   if (value === "video") return "visual";
   return isModuleName(value) ? value : null;
+}
+
+function normalizeVisualControlAuthority(value: unknown): PerformanceState["modules"]["visual"]["controlAuthority"] {
+  const record = isRecord(value) ? value : {};
+  const fallbackAfterMs = Math.max(1_000, Math.round(positiveNumber(record.fallbackAfterMs, VISUAL_AUTHORITY_FALLBACK_MS)));
+  return {
+    owner: record.owner === "vj" ? "vj" : "show-control",
+    source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : null,
+    lastVjAt: nullableTimestamp(record.lastVjAt),
+    activeUntil: nullableTimestamp(record.activeUntil),
+    fallbackAfterMs
+  };
+}
+
+function nullableTimestamp(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function isVisualAuthorityActive(state: PerformanceState, now = Date.now()) {
+  const authority = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
+  return authority.owner === "vj" && typeof authority.activeUntil === "number" && authority.activeUntil > now;
+}
+
+function shouldDeferVisualControlToVj(state: PerformanceState, source: unknown) {
+  return !isVjVisualSource(source) && isVisualAuthorityActive(state);
+}
+
+function markVisualAuthorityFromVj(state: PerformanceState, source: unknown, now = Date.now()) {
+  const current = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
+  state.modules.visual.controlAuthority = {
+    owner: "vj",
+    source: String(source || "vj-4302"),
+    lastVjAt: now,
+    activeUntil: now + current.fallbackAfterMs,
+    fallbackAfterMs: current.fallbackAfterMs
+  };
+}
+
+function markVisualAuthorityFromShowControl(state: PerformanceState, source: unknown) {
+  const current = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
+  if (isVisualAuthorityActive(state)) return;
+  state.modules.visual.controlAuthority = {
+    owner: "show-control",
+    source: String(source || "show-control"),
+    lastVjAt: current.lastVjAt,
+    activeUntil: null,
+    fallbackAfterMs: current.fallbackAfterMs
+  };
 }
 
 function normalizeLockedModules(value: unknown): ModuleName[] {

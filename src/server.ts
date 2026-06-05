@@ -276,8 +276,9 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     }
     const patch = isRecord(req.body.patch) ? req.body.patch : req.body;
     const sanitizedPatch = moduleName === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
-    if (!store.canApplyModulePatch(moduleName, String(req.body.source || "rest"))) {
-      res.status(423).json({ ok: false, error: "Operation lock active", state: store.getState() });
+    const blockReason = store.getModulePatchBlockReason(moduleName, String(req.body.source || "rest"));
+    if (blockReason) {
+      res.status(blockReason === "VJ control active" ? 409 : 423).json({ ok: false, error: blockReason, state: store.getState() });
       return;
     }
     store.applyModulePatch(moduleName, patch, String(req.body.source || "rest"));
@@ -289,8 +290,9 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
   app.post("/api/control", requireToken(options), (req, res) => {
     const origin = resolveRequestOrigin(req.headers, req.secure);
     const command = normalizeControlCommand(req.body);
-    if (!store.canApplyControlCommand(command)) {
-      res.status(423).json({ ok: false, error: "Operation lock active", state: store.getState() });
+    const blockReason = store.getControlCommandBlockReason(command);
+    if (blockReason) {
+      res.status(blockReason === "VJ control active" ? 409 : 423).json({ ok: false, error: blockReason, state: store.getState() });
       return;
     }
     store.applyControlCommand(command);
@@ -442,8 +444,9 @@ function attachWebSocket(
 
       if (message.type === "module.statePatch") {
         if (!isModuleName(message.module)) throw new Error("module.statePatch.module must be audio, visual, or interaction");
-        if (!store.canApplyModulePatch(message.module, String(message.source || clientId || "ws"))) {
-          hub.send(socket, { type: "error", error: "Operation lock active", module: message.module });
+        const blockReason = store.getModulePatchBlockReason(message.module, String(message.source || clientId || "ws"));
+        if (blockReason) {
+          hub.send(socket, { type: "error", error: blockReason, module: message.module });
           return;
         }
         const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
@@ -463,8 +466,9 @@ function attachWebSocket(
 
       if (message.type === "control.command") {
         const command = normalizeControlCommand(message);
-        if (!store.canApplyControlCommand(command)) {
-          hub.send(socket, { type: "error", error: "Operation lock active", command });
+        const blockReason = store.getControlCommandBlockReason(command);
+        if (blockReason) {
+          hub.send(socket, { type: "error", error: blockReason, command });
           return;
         }
         store.applyControlCommand(command);
