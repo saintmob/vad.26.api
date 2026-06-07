@@ -1,7 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Activity,
   Aperture,
   AudioLines,
   Camera,
@@ -10,26 +9,34 @@ import {
   Pause,
   Play,
   Radio,
-  RotateCcw,
   Save,
   Send,
   Settings2,
   Shuffle,
-  SlidersHorizontal,
   Square,
-  Trash2,
   X,
-  Type,
-  Eye,
-  Bug,
   Maximize
 } from "lucide-react";
 import type { ControlCommand, ModuleName, PerformanceState, ScreenOwner, ScreenRoutePreset } from "../types";
 import { createFirebaseDashboardClient, shouldUseFirebaseRealtime } from "./firebaseShowControl";
 import { createIdFragment } from "./id";
+import {
+  apiUrl,
+  webSocketUrl,
+  fetchJson,
+  fetchInitialState,
+  useWebSocket,
+  isStateSnapshot,
+  isStatePatch,
+  isShowPatch,
+  isControlAck,
+  isErrorMessage,
+  applyStatePatch,
+  applyShowPatch,
+  ConnectionState,
+  ServerMessage
+} from "./useShowState";
 import "./styles.css";
-
-type ConnectionState = "connecting" | "connected" | "offline";
 type ScreenSelectionMode = "solid" | "dashed" | "box";
 type SequenceStep = "1/16" | "1/8" | "1/4" | "1/2" | "1";
 type SequenceGroup = { order: number; screenIds: string[] };
@@ -147,10 +154,6 @@ type UiCopy = {
 
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env || {};
 const defaultControlToken = env.VITE_CONTROL_TOKEN || "";
-const configuredShowBackendUrl = String(env.VITE_SHOW_BACKEND_URL || "").trim().replace(/\/$/, "");
-const configuredShowWsUrl = String(env.VITE_SHOW_WS_URL || "").trim().replace(/\/$/, "");
-const hostedShowBackendUrl = "https://vad-26-show-control.saintmob.workers.dev";
-const hostedShowWsUrl = "wss://vad-26-show-control.saintmob.workers.dev/ws";
 const CLIENT_ONLINE_STALE_MS = 120_000;
 const MIN_PENDING_ACTION_MS = 180;
 const storageKeys = {
@@ -158,15 +161,6 @@ const storageKeys = {
   theme: "vad-theme-mode",
   language: "vad-language-mode"
 } as const;
-
-type ServerMessage =
-  | { type: "state.snapshot"; state: PerformanceState }
-  | { type: "state.patch"; state?: PerformanceState; module: ModuleName; patch: Record<string, unknown>; updatedAt?: number }
-  | { type: "show.patch"; patch: PerformanceState["show"]; updatedAt?: number }
-  | { type: "control.ack"; ok: boolean; command: ControlCommand }
-  | { type: "client.presence"; state?: PerformanceState }
-  | { type: "error"; error: string }
-  | { type: string; [key: string]: unknown };
 
 const moduleLabels: Record<ModuleName, { label: string; icon: React.ReactNode; accent: string }> = {
   audio: { label: "Audio", icon: <AudioLines size={17} />, accent: "var(--audio)" },
@@ -713,7 +707,7 @@ function App() {
 
     async function boot() {
       try {
-        const state = await fetchJson<PerformanceState>(apiUrl("/api/state"));
+        const state = await fetchInitialState();
         if (!closed) setSnapshot(state);
         if (shouldUseFirebaseRealtime() && token.trim()) {
           firebaseClient = createFirebaseDashboardClient({
@@ -1091,8 +1085,6 @@ function App() {
     const head = clientIds.slice(0, 2).join(" · ");
     return clientIds.length > 2 ? `${head} +${clientIds.length - 2}` : head;
   };
-  const pageCopy = ui.tabs[activeTab];
-  const latestAck = lastAck || ui.status.waiting;
   const showStatusLabel = ui.show[show.status];
   const effectiveSyncStatus: SyncStatus = pendingActions.size > 0 ? "sending" : syncStatus;
   const syncLabel =
@@ -1103,34 +1095,6 @@ function App() {
         : lastSyncedAt
           ? (locale === "zh" ? `已同步 ${new Date(lastSyncedAt).toLocaleTimeString()}` : `Synced ${new Date(lastSyncedAt).toLocaleTimeString()}`)
           : (locale === "zh" ? "待同步" : "Idle");
-  const workspaceStatusItems = [
-    {
-      key: "devices",
-      icon: <Grid3X3 size={13} />,
-      label: locale === "zh" ? "设备" : "Devices",
-      value: `${clientCount}/${routeCount}`
-    },
-    {
-      key: "connection",
-      icon: <Radio size={13} />,
-      label: ui.app.connection,
-      value: ui.status[connection],
-      state: connection
-    },
-    {
-      key: "sync",
-      icon: <RotateCcw size={13} />,
-      label: locale === "zh" ? "同步" : "Sync",
-      value: syncLabel,
-      state: effectiveSyncStatus === "error" ? "offline" : effectiveSyncStatus === "sending" ? "connecting" : "connected"
-    },
-    {
-      key: "show",
-      icon: <Play size={13} />,
-      label: ui.app.showStatus,
-      value: showStatusLabel
-    }
-  ];
   const actionButtonClass = (
     module: ControlCommand["module"],
     command: string,
@@ -1142,819 +1106,353 @@ function App() {
     selected ? "selected" : "",
     pendingActions.has(makeActionKey(module, command, target)) ? "is-pending" : ""
   ].filter(Boolean).join(" ");
-  const interactionLayoutStyle = {
-    "--right-rail-width": "clamp(330px, 23vw, 390px)"
-  } as React.CSSProperties;
 
   return (
-    <main className="console-shell" data-theme={theme} data-locale={locale}>
-      <header className="console-header">
-        <div className="brand-block">
-          <div className="brand-mark">V</div>
+    <main className="shell" data-theme={theme} data-locale={locale}>
+      <header className="bar" aria-label="Global command">
+        <div className="brand">
+          <div className="mark">V</div>
           <div>
-            <strong>{ui.app.title}</strong>
-            <span>{ui.app.subtitle}</span>
+            <p className="kicker">{ui.app.subtitle}</p>
+            <h1>{ui.app.title}</h1>
           </div>
         </div>
-
-        <button
-          type="button"
-          className="settings-trigger"
-          aria-label={ui.layout.systemSettings}
-          onClick={() => setSettingsOpen(true)}
-        >
-          <Settings2 size={16} />
-          <span>{ui.layout.systemSettings}</span>
-        </button>
-
-        <section className="header-log-strip" aria-label={ui.interaction.eventLog}>
-          <div className="header-log-strip__ack">
-            <span>{locale === "zh" ? "回执" : "Ack"}</span>
-            <strong>{latestAck}</strong>
-          </div>
-          <div className="header-log-strip__events">
-            {visibleHeaderEventLog.length > 0 ? visibleHeaderEventLog.map((event) => (
-              <article key={event.id}>
-                <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
-                <strong>{event.type}</strong>
-                <p>{event.message}</p>
-              </article>
-            )) : (
-              <article>
-                <span>--:--:--</span>
-                <strong>{ui.interaction.eventLog}</strong>
-                <p>{ui.status.waiting}</p>
-              </article>
-            )}
-          </div>
-        </section>
+        <div className="chips">
+          <span className="chip">
+            <i className={`dot ${connection === "connected" ? "ok" : connection === "connecting" ? "warn" : "err"}`} />
+            <small>{locale === "zh" ? "连接" : "Connection"}</small>
+            <strong>{connection === "connected" ? (locale === "zh" ? "已连接" : "Connected") : connection === "connecting" ? (locale === "zh" ? "连接中" : "Connecting") : (locale === "zh" ? "离线" : "Offline")}</strong>
+          </span>
+          <span className="chip"><small>{locale === "zh" ? "设备" : "Devices"}</small><strong>{clientCount}/20</strong></span>
+          <span className="chip"><small>{locale === "zh" ? "状态" : "Status"}</small><strong>{showStatusLabel}</strong></span>
+          <span className="chip"><small>{locale === "zh" ? "同步" : "Sync"}</small><strong>{syncLabel}</strong></span>
+        </div>
+        <div className="actions" aria-label="Show Transport commands">
+          <button type="button" className="cmd write" onClick={() => sendControl("show", "play", show.id)}>{ui.actions.play}</button>
+          <button type="button" className="cmd write" onClick={() => sendControl("show", "pause", show.id)}>{ui.actions.pause}</button>
+          <button type="button" className="cmd write" onClick={() => sendControl("show", "stop", show.id)}>{ui.actions.stop}</button>
+          <button type="button" className="cmd write" onClick={() => sendControl("show", "reset", show.id)}>{ui.actions.reset}</button>
+          <button type="button" className="cmd danger write" onClick={() => sendControl("show", "setLocked", show.id, !snapshot.operationLock.locked)}>{snapshot.operationLock.locked ? "UNLOCK" : "LOCK"}</button>
+          <button type="button" className="cmd pending" onClick={() => setSettingsOpen(true)} aria-label={ui.layout.systemSettings}>
+            <Settings2 size={14} /> {ui.layout.systemSettings}
+          </button>
+        </div>
       </header>
 
-      <section className="console-body">
-        {activeTab !== "interaction" && (
-          <div className="page-meta">
-            <div>
-              <p>{ui.app.activeTab}</p>
-              <h1>{pageCopy.label}</h1>
-              <span>{pageCopy.detail}</span>
+      <section className="workspace" aria-label="Control workspace">
+        <aside className="col left">
+          <section className="module vj" aria-label="VJ Quick Director">
+            <div className="module-head">
+              <h2>VJ Quick Director</h2>
             </div>
-          </div>
-        )}
-
-        {activeTab === "interaction" ? (
-          <section className="workspace-grid workspace-grid--interaction">
-            <Panel
-              title={ui.interaction.title}
-              icon={<MonitorCog size={18} />}
-              className="workspace-panel workspace-panel--interaction"
-              headerExtra={(
-                <div className="workspace-status-strip">
-                  {workspaceStatusItems.map((item) => (
-                    <span key={item.key} className="workspace-status-chip">
-                      {item.state && <i className={`connection-dot ${item.state}`} />}
-                      {item.icon}
-                      <small>{item.label}</small>
-                      <strong>{item.value}</strong>
-                    </span>
-                  ))}
-                </div>
-              )}
-            >
-                <div className="interaction-layout-core">
-                    <div className="operator-stack" aria-label={locale === "zh" ? "现场有效操作" : "Live controls"}>
-                      <section className="operator-card operator-card--dj operator-card--row">
-                        <div className="operator-card__head">
-                          <AudioLines size={15} />
-                          <strong>{ui.audio.title}</strong>
-                          <span>4301 · {snapshot.modules.audio.projectName}</span>
-                        </div>
-                        <div className="operator-row-body operator-row-body--dj">
-                          <div className="dj-player-primary" aria-label={ui.layout.transport}>
-                          <button type="button" className={actionButtonClass("show", "play", show.id, show.status === "running")} onClick={() => sendControl("show", "play", show.id)} title={ui.actions.play}>
-                            <Play size={14} />
-                          </button>
-                          <button type="button" className={actionButtonClass("show", "pause", show.id, show.status === "paused")} onClick={() => sendControl("show", "pause", show.id)} title={ui.actions.pause}>
-                            <Pause size={14} />
-                          </button>
-                          <button type="button" className={actionButtonClass("show", "stop", show.id, show.status === "ended")} onClick={() => sendControl("show", "stop", show.id)} title={ui.actions.stop}>
-                            <Square size={14} />
-                          </button>
-                          <button type="button" className={actionButtonClass("show", "reset", show.id)} onClick={() => sendControl("show", "reset", show.id)} title={ui.actions.reset}>
-                            <RotateCcw size={14} />
-                          </button>
-                            <span>{snapshot.modules.audio.bpm} BPM · {snapshot.modules.audio.transport}</span>
-                          </div>
-                          <div className="dj-status-grid" aria-label={locale === "zh" ? "4301 音频状态" : "4301 audio status"}>
-                            <div>
-                              <span>{ui.audio.activeSource}</span>
-                              <strong>{activeSource?.displayName || (locale === "zh" ? "无音源" : "No source")}</strong>
-                            </div>
-                            <div>
-                              <span>{ui.audio.presets}</span>
-                              <strong>{snapshot.modules.audio.activePreset || "--"}</strong>
-                            </div>
-                            <div>
-                              <span>{ui.metrics.master}</span>
-                              <strong>{Math.round(snapshot.modules.audio.masterLevel * 100)}%</strong>
-                            </div>
-                            <div>
-                              <span>{locale === "zh" ? "状态" : "State"}</span>
-                              <strong>{activeSource?.muted ? ui.actions.mute : activeSource?.speaking ? ui.audio.speaking : showStatusLabel}</strong>
-                            </div>
-                          </div>
-                          <div className="operator-actions operator-actions--styles">
-                            {audioStyles.map((style) => (
-                              <button
-                                key={style.id}
-                                type="button"
-                                className={actionButtonClass("audio", "setStyle", "audio-style", (snapshot.modules.audio.activeStyleId || activeSource?.styleId || "default") === style.id)}
-                                onClick={() => sendControl("audio", "setStyle", "audio-style", style.id)}
-                              >
-                                {style.label}
-                              </button>
-                            ))}
-                            <button
-                              type="button"
-                              className={actionButtonClass("audio", "shuffleStyle", "audio-shuffle", false, "shuffle-btn")}
-                              onClick={() => sendControl("audio", "shuffleStyle", "audio-shuffle", true)}
-                              title={locale === "zh" ? "随机重组当前 DJ 样式" : "Shuffle current DJ style"}
-                            >
-                              <Shuffle size={13} />
-                              Shuffle
-                            </button>
-                          </div>
-                          <div className="dj-source-strip" aria-label={ui.audio.sourceList}>
-                            {audioSources.slice(0, 4).map((source) => (
-                              <button
-                                key={source.sourceId}
-                                type="button"
-                                className={actionButtonClass("audio", "setMute", source.sourceId, source.muted)}
-                                onClick={() => sendControl("audio", "setMute", source.sourceId, !source.muted)}
-                                title={`${source.displayName} · ${Math.round(source.level * 100)}%`}
-                              >
-                                <span>{source.displayName}</span>
-                                <i style={{ width: `${Math.round(source.level * 100)}%` }} />
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="operator-card operator-card--vj operator-card--row">
-                        <div className="operator-card__head">
-                          <Aperture size={15} />
-                          <strong>VJ</strong>
-                          <span>{visualScenes.find((scene) => scene.id === snapshot.modules.visual.scene)?.label || snapshot.modules.visual.scene}</span>
-                        </div>
-                        <div className="operator-row-body operator-row-body--vj">
-                          <div className="operator-group operator-group--drive">
-                            <span>{ui.visual.drive}</span>
-                            <div className="operator-actions operator-actions--drive">
-                              {visualAudioDrives.map((drive) => (
-                                <button
-                                  key={drive}
-                                  type="button"
-                                  className={actionButtonClass("visual", "setAudioDrive", "visual-audio-drive", snapshot.modules.visual.audioDriveMode === drive)}
-                                  onClick={() => sendControl("visual", "setAudioDrive", "visual-audio-drive", drive)}
-                                >
-                                  {drive === "api" ? "show api" : drive}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="operator-group">
-                            <span>{ui.visual.scene}</span>
-                            <div className="operator-actions operator-actions--scenes">
-                              {visualScenes.map((scene) => (
-                                <button
-                                  key={scene.id}
-                                  type="button"
-                                  className={actionButtonClass("visual", "setScene", "visual-main", snapshot.modules.visual.scene === scene.id)}
-                                  title={scene.preset}
-                                  onClick={() => sendControl("visual", "setScene", "visual-main", scene.id)}
-                                >
-                                  {scene.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <form className="operator-text-form operator-text-form--primary" onSubmit={(event) => {
-                            event.preventDefault();
-                            void sendControl("visual", "setText", "visual-text", {
-                              value: manualText,
-                              animation: snapshot.modules.visual.text.animation,
-                              reactive: snapshot.modules.visual.text.reactive
-                            });
-                          }}>
-                            <select
-                              value={snapshot.modules.visual.text.animation}
-                              onChange={(event) => sendControl("visual", "setText", "visual-text-style", {
-                                value: snapshot.modules.visual.text.value,
-                                animation: event.target.value,
-                                reactive: snapshot.modules.visual.text.reactive
-                              })}
-                            >
-                              {visualTextStyles.map((style) => <option key={style} value={style}>{style}</option>)}
-                            </select>
-                            <input value={manualText} onChange={(event) => setManualText(event.target.value)} />
-                            <button
-                              type="submit"
-                              className={actionButtonClass("visual", "setText", "visual-text")}
-                              title={ui.actions.send}
-                            >
-                              <Send size={14} />
-                            </button>
-                          </form>
-                        </div>
-                      </section>
-
-                      <section className="operator-card operator-card--baofa operator-card--row">
-                        <div className="operator-card__head">
-                          <MonitorCog size={15} />
-                          <strong>Baofa</strong>
-                          <span>4303 · {snapshot.modules.interaction.visualMode === "tree" ? `Tree · ${ui.interactionModes[snapshot.modules.interaction.mode]}` : `Fireworks · ${fireworkStateLabel}`}</span>
-                        </div>
-                        <div className="operator-row-body operator-row-body--baofa">
-                          <div className="operator-group operator-group--engine">
-                            <span>Engine</span>
-                            <div className="operator-actions operator-actions--engine">
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "tree")}
-                                onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
-                              >
-                                Tree
-                              </button>
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setVisualMode", "visual-mode", snapshot.modules.interaction.visualMode === "firework")}
-                                onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
-                              >
-                                Fireworks
-                              </button>
-                            </div>
-                          </div>
-                          {snapshot.modules.interaction.visualMode === "tree" ? (
-                            <div className="operator-group operator-group--mode">
-                              <span>Tree · {ui.interactionModes[snapshot.modules.interaction.mode]}</span>
-                              <div className="operator-actions operator-actions--compact">
-                                {["idle", "flow", "interaction", "climax"].map((mode) => (
-                                  <button
-                                    key={mode}
-                                    type="button"
-                                    className={actionButtonClass("interaction", "setMode", sequenceGroups.length === 0 ? "interaction-mode" : "sequence", snapshot.modules.interaction.mode === mode)}
-                                    onClick={() => triggerInteractionMode(mode)}
-                                  >
-                                    {ui.interactionModes[mode]}
-                                  </button>
-                                ))}
-                                <button
-                                  type="button"
-                                  className={actionButtonClass("interaction", "resetTree", "tree-reset", false, "reset-btn")}
-                                  onClick={() => { clearSequence(); void sendControl("interaction", "resetTree", "tree-reset", true); }}
-                                >
-                                  Reset
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="operator-group operator-group--mode">
-                              <span>Fireworks · {fireworkStateLabel}</span>
-                              <div className="operator-actions operator-actions--compact">
-                                <button
-                                  type="button"
-                                  className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "standby")}
-                                  onClick={standbyFireworks}
-                                >
-                                  Standby
-                                </button>
-                                <button
-                                  type="button"
-                                  className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "launching")}
-                                  onClick={launchFireworks}
-                                >
-                                  Launch
-                                </button>
-                                <button
-                                  type="button"
-                                  className={actionButtonClass("interaction", "setFireworkState", "firework-state", fireworkState === "resetting")}
-                                  onClick={resetFireworks}
-                                >
-                                  Reset
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                          <div className="operator-group operator-group--fish">
-                            <span>Fish · {baofaFishState === "roam" ? "ROAM" : baofaFishState === "running" ? "RUNNING" : "IDLE"}</span>
-                            <div className="operator-actions operator-actions--status">
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "idle")}
-                                onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle")}
-                              >
-                                Idle
-                              </button>
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "running")}
-                                onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "running")}
-                              >
-                                Run
-                              </button>
-                              <button
-                                type="button"
-                                className={actionButtonClass("interaction", "setBaofaFishState", "baofa-fish", baofaFishState === "roam")}
-                                onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "roam")}
-                              >
-                                Roam
-                              </button>
-                            </div>
-                          </div>
-                          {sequenceGroups.length > 0 && (
-                            <div className="seq-pill seq-pill--embedded">
-                              <span className="seq-label">{ui.interaction.step}</span>
-                              <div className="seq-buttons">
-                                {sequenceSteps.map((step) => (
-                                  <button
-                                    key={step}
-                                    type="button"
-                                    className={sequenceStep === step ? "selected" : ""}
-                                    onClick={() => setSequenceStep(step)}
-                                  >
-                                    {step}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </section>
-                    </div>
-
-                    <div className="screen-stage-container">
-                    <div className="screen-stage">
-                      <div className="presentation-toggles presentation-toggles--overlay">
-                        <button
-                          type="button"
-                          className={actionButtonClass("visual", "setFullscreen", "visual-fullscreen", snapshot.modules.visual.fullscreen)}
-                          onClick={() => sendControl("visual", "setFullscreen", "visual-fullscreen", !snapshot.modules.visual.fullscreen)}
-                          title={ui.visual.fullscreen}
-                        >
-                          <Maximize size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className={actionButtonClass("interaction", "setScreenMenuVisible", "screen-menu", screenPresentation.showMenu)}
-                          onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
-                          title={ui.interaction.showMenu}
-                        >
-                          <Eye size={14} />
-                        </button>
-                        <span className={`show-status-icon show-status-icon--${show.status}`} title={`${ui.app.showStatus}: ${showStatusLabel}`}>
-                          <Activity size={14} />
-                        </span>
-                        <button
-                          type="button"
-                          className={actionButtonClass("interaction", "setScreenCameraEnabled", "screen-camera", screenPresentation.cameraEnabled)}
-                          onClick={() => sendControl("interaction", "setScreenCameraEnabled", "screen-camera", !screenPresentation.cameraEnabled)}
-                          title={locale === "zh" ? "开启摄像头" : "Enable camera"}
-                        >
-                          <Camera size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className={actionButtonClass("interaction", "setScreenDebugVisible", "screen-debug", screenPresentation.showDebug)}
-                          onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
-                          title={ui.interaction.showDebug}
-                        >
-                          <Bug size={14} />
-                        </button>
-                      </div>
-                      <div className="stage-overlay-tools">
-                        <div className="selection-mode-picker">
-                          {screenSelectionModes.map((mode) => {
-                            const Icon = mode.id === "solid" ? Square : mode.id === "dashed" ? Grid3X3 : Maximize;
-                            return (
-                              <button
-                                key={mode.id}
-                                type="button"
-                                className={screenSelectionMode === mode.id ? "selected" : ""}
-                                onClick={() => {
-                                  setScreenSelectionMode(mode.id);
-                                  setDragBox(null);
-                                  if (mode.id === "solid") clearSequence();
-                                }}
-                                title={ui.screenSelectionModes[mode.id]}
-                              >
-                                <Icon size={16} />
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div
-                        className={`screen-grid selection-mode-${screenSelectionMode}`}
-                        data-composing={routeComposerOpen ? "true" : "false"}
-                        aria-label={ui.interaction.screenMap}
-                        ref={screenGridRef}
-                        onPointerDown={handleBoxPointerDown}
-                        onPointerMove={handleBoxPointerMove}
-                        onPointerUp={handleBoxPointerUp}
-                        onPointerCancel={() => setDragBox(null)}
-                      >
-                        {screenLayoutItems.map((screen) => {
-                          const route = screenRoutes[screen.id];
-                          const draft = routeDraft[screen.id];
-                          const screenClients = routeClientsByScreenId.get(screen.id) || [];
-                          const isScreenOnline = screenClients.length > 0;
-                          const effectiveOwner = routeComposerOpen ? draft?.owner : route?.owner;
-                          const effectiveScene = routeComposerOpen ? draft?.scene : undefined;
-                          return (
-                            <button
-                              key={screen.id}
-                              type="button"
-                              data-screen-id={screen.id}
-                              className={[
-                                snapshot.modules.interaction.screenId === screen.id ? "selected" : "",
-                                routeComposerOpen && selectedComposerScreenId === screen.id ? "selected composing-selected" : "",
-                                sequenceOrderByScreen.has(screen.id) ? "sequenced" : "",
-                                screen.id === "A1" ? "master-screen" : "",
-                                effectiveOwner ? `owner-${effectiveOwner}` : "",
-                                isScreenOnline ? "is-online" : "is-offline",
-                                pendingActions.has(makeActionKey("interaction", "setScreen", screen.id)) ? "is-pending" : ""
-                              ].filter(Boolean).join(" ")}
-                              style={getScreenLayoutStyle(screen)}
-                              onClick={() => handleScreenSelect(screen.id)}
-                              title={routeComposerOpen ? `${screen.id} · ${effectiveScene || ""}` : (route?.url || route?.owner || screen.id)}
-                            >
-                              <i className="device-dot" aria-label={isScreenOnline ? (locale === "zh" ? "设备在线" : "Device online") : (locale === "zh" ? "设备离线" : "Device offline")} />
-                              <strong>{screen.id}</strong>
-                              <span>{routeComposerOpen ? (effectiveOwner === "vj" ? effectiveScene : ui.screenOwners[effectiveOwner || "unset"]) : ui.screenOwners[route?.owner || "unset"]}</span>
-                              {isScreenOnline && <small>{screenClients.length}</small>}
-                              {sequenceOrderByScreen.has(screen.id) && (
-                                <em className="screen-order">{sequenceOrderByScreen.get(screen.id)}</em>
-                              )}
-                            </button>
-                          );
-                        })}
-                        {dragBox && <span className="selection-box" style={dragBoxStyle(dragBox)} />}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="interaction-controls-footer">
-                  {/* All controls moved to interaction-header-block */}
-                </div>
-            </Panel>
-
-            <aside className="interaction-rail interaction-rail--right">
-              <div className="rail-shell">
-                <div className="rail-header">
-                  <div>
-                    <strong>{routeComposerOpen ? (locale === "zh" ? "VJ 编排" : "VJ arrangement") : ui.layout.routes}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    className={routeComposerOpen ? "rail-action selected" : "rail-action"}
-                    onClick={routeComposerOpen ? closeRouteComposer : openRouteComposer}
-                  >
-                    {routeComposerOpen ? <X size={14} /> : <SlidersHorizontal size={14} />}
-                    <span>{routeComposerOpen ? (locale === "zh" ? "退出" : "Exit") : (locale === "zh" ? "编排" : "Arrange")}</span>
-                  </button>
-                </div>
-
-                <div className="rail-stack rail-stack--right">
-                  <section className={routeComposerOpen ? "route-board route-board--composer-mode" : "route-board"}>
-                    {routeComposerOpen ? (
-                      <>
-                        <div className="route-board__head route-board__head--composer">
-                          <div>
-                            <p>{locale === "zh" ? "当前设备" : "Selected screen"}</p>
-                            <strong>{selectedComposerScreenId} · {selectedDraft.owner === "vj" ? selectedDraftSceneLabel : ui.screenOwners[selectedDraft.owner]}</strong>
-                            {selectedDraft.owner === "vj" && <em>{selectedDraft.scene}</em>}
-                          </div>
-                        </div>
-
-                        <div className="composer-form">
-                          <label>
-                            <span>{locale === "zh" ? "方案名" : "Name"}</span>
-                            <input
-                              value={routeComposerName}
-                              onChange={(event) => setRouteComposerName(event.target.value)}
-                              maxLength={40}
-                            />
-                          </label>
-                          <button type="button" className="composer-save" onClick={saveRouteArrangement}>
-                            <Save size={14} /> {ui.actions.save}
-                          </button>
-                        </div>
-
-                        <div className="composer-owner-row">
-                          {(["vj", "baofa", "off"] as ScreenOwner[]).map((owner) => (
-                            <button
-                              key={owner}
-                              type="button"
-                              className={selectedDraft.owner === owner ? "selected" : ""}
-                              onClick={() => setDraftScreenOwner(selectedComposerScreenId, owner)}
-                            >
-                              {ui.screenOwners[owner]}
-                            </button>
-                          ))}
-                        </div>
-
-                        {selectedDraft.owner === "vj" && (
-                          <div className="vj-scene-grid vj-scene-grid--composer">
-                            {visualScenes.map((scene) => (
-                              <button
-                                key={scene.id}
-                                type="button"
-                                className={selectedDraft.scene === scene.id ? "selected" : ""}
-                                onClick={() => setDraftScreenScene(selectedComposerScreenId, scene.id)}
-                              >
-                                <strong>{scene.label}</strong>
-                                <span>{scene.preset}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="route-table route-table--rail route-table--composer">
-                          {routeScreenIds.map((screenId) => {
-                            const draft = routeDraft[screenId] || { owner: "baofa" as ScreenOwner, scene: "Video Flow" };
-                            return (
-                              <article
-                                key={screenId}
-                                className={selectedComposerScreenId === screenId ? "selected" : ""}
-                                onClick={() => setSelectedComposerScreenId(screenId)}
-                              >
-                                <div>
-                                  <strong><i className="device-dot" />{screenId}</strong>
-                                  <span>{draft.owner === "vj" ? draft.scene : ui.screenOwners[draft.owner]}</span>
-                                </div>
-                              </article>
-                            );
-                          })}
-                        </div>
-
-                        {customRoutePresets.length > 0 && (
-                          <div className="route-presets-rail route-presets-rail--custom">
-                            <span className="rail-label">{locale === "zh" ? "用户预设" : "User presets"}</span>
-                            <div className="custom-preset-list">
-                              {customRoutePresets.map((preset) => (
-                                <div key={preset.id} className="custom-preset-row">
-                                  <button
-                                    type="button"
-                                    className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.id)}
-                                    onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.id)}
-                                  >
-                                    {preset.name}
-                                  </button>
-                                  <button type="button" className="delete-preset" onClick={() => deleteRouteArrangement(preset.id)} title={locale === "zh" ? "删除" : "Delete"}>
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <div className="route-presets-rail">
-                          <div className="route-presets">
-                            {screenRoutePresets.map((preset) => (
-                              <button
-                                key={preset.value}
-                                type="button"
-                                className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.value)}
-                                onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
-                              >
-                                {ui.screenRoutePresets[preset.value]}
-                              </button>
-                            ))}
-                            {customRoutePresets.map((preset) => (
-                              <button
-                                key={preset.id}
-                                type="button"
-                                className={actionButtonClass("interaction", "setScreenRoutePreset", "screen-routes", snapshot.modules.interaction.screenRoutePreset === preset.id)}
-                                onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.id)}
-                              >
-                                {preset.name}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="route-table route-table--rail">
-                          {routeScreenIds.map((screenId) => {
-                            const route = screenRoutes[screenId];
-                            const routeClients = routeClientsByScreenId.get(screenId) || [];
-                            const isRouteOnline = routeClients.length > 0;
-                            const clientSummary = summarizeClientIds(
-                              routeClients,
-                              locale === "zh" ? "暂无在线设备" : "No live device"
-                            );
-                            const isSelected = snapshot.modules.interaction.screenId === screenId;
-                            return (
-                              <article key={screenId} className={[isSelected ? "selected" : "", isRouteOnline ? "is-online" : "is-offline"].filter(Boolean).join(" ")}>
-                                <div>
-                                  <strong>
-                                    <i className="device-dot" />
-                                    {screenId}
-                                    <em className={`route-owner-badge owner-${route?.owner || "unset"}`}>
-                                      {ui.screenOwners[route?.owner || "unset"]}
-                                    </em>
-                                  </strong>
-                                  <small className="route-meta-line">
-                                    {route?.updatedAt ? new Date(route.updatedAt).toLocaleTimeString() : (locale === "zh" ? "等待中" : "Waiting")} · {ui.interaction.clients}: {clientSummary}
-                                  </small>
-                                </div>
-                                <div className="owner-switch" aria-label={`${screenId} owner`}>
-                                  {routePanelOwners.map((owner) => (
-                                    <button
-                                      key={owner.value}
-                                      type="button"
-                                      className={actionButtonClass("interaction", "setScreenOwner", screenId, route?.owner === owner.value, route?.owner === owner.value ? `owner-${owner.value}` : "")}
-                                      onClick={() => sendControl("interaction", "setScreenOwner", screenId, owner.value)}
-                                    >
-                                      {ui.screenOwners[owner.value]}
-                                    </button>
-                                  ))}
-                                </div>
-                              </article>
-                            );
-                          })}
-
-                          {unassignedClients.length > 0 && (
-                            <article className="route-table__unassigned">
-                              <div>
-                                <strong>{locale === "zh" ? "未绑定" : "Unassigned"}</strong>
-                                <span>{summarizeClientIds(unassignedClients, locale === "zh" ? "暂无在线设备" : "No live device")}</span>
-                                <small>{ui.interaction.clients}</small>
-                              </div>
-                            </article>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </section>
-
-                </div>
-              </div>
-            </aside>
-          </section>
-        ) : activeTab === "visual" ? (
-          <section className="workspace-grid workspace-grid--module workspace-grid--visual">
-            <Panel title={ui.visual.title} icon={<Aperture size={18} />}>
-              <p className="panel-lead">{ui.visual.lead}</p>
-
-              <div className="scene-readout">
-                <div>
-                  <span>{ui.visual.scene}</span>
-                  <strong>{snapshot.modules.visual.scene}</strong>
-                </div>
-                <div>
-                  <span>{ui.visual.preset}</span>
-                  <strong>{snapshot.modules.visual.preset}</strong>
-                </div>
-              </div>
-
-              <div className="swatches" aria-label={ui.visual.colors}>
-                {Object.entries(snapshot.modules.visual.colors).map(([name, color]) => (
-                  <span key={name} title={name} style={{ background: color }} />
-                ))}
-              </div>
-
-              <div className="button-row">
-                {visualScenes.map((scene) => (
-                  <button
-                    key={scene.id}
-                    type="button"
-                    className={actionButtonClass("visual", "setScene", "visual-main", snapshot.modules.visual.scene === scene.id)}
-                    title={scene.preset}
-                    onClick={() => sendControl("visual", "setScene", "visual-main", scene.id)}
-                  >
-                    {scene.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="visual-drive-control">
-                <span>{ui.visual.drive}</span>
-                <div className="button-row button-row--tight">
+            <div className="controls">
+              <div>
+                <div className="label"><span>{ui.visual.drive}</span></div>
+                <div className="btn-grid three">
                   {visualAudioDrives.map((drive) => (
                     <button
                       key={drive}
                       type="button"
-                      className={actionButtonClass("visual", "setAudioDrive", "visual-audio-drive", snapshot.modules.visual.audioDriveMode === drive)}
+                      className={["mini-btn", snapshot.modules.visual.audioDriveMode === drive ? "primary" : ""].filter(Boolean).join(" ")}
                       onClick={() => sendControl("visual", "setAudioDrive", "visual-audio-drive", drive)}
                     >
                       {drive === "api" ? "show api" : drive}
                     </button>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  className={actionButtonClass("visual", "setFullscreen", "visual-fullscreen", snapshot.modules.visual.fullscreen)}
-                  onClick={() => sendControl("visual", "setFullscreen", "visual-fullscreen", !snapshot.modules.visual.fullscreen)}
-                >
-                  {ui.visual.fullscreen}
-                </button>
               </div>
-
-              <form className="inline-form" onSubmit={(event) => {
-                event.preventDefault();
-                void sendControl("visual", "setText", "visual-text", {
-                  value: manualText,
-                  animation: snapshot.modules.visual.text.animation,
-                  reactive: snapshot.modules.visual.text.reactive
-                });
-              }}>
-                <Type size={16} />
-                <select
-                  value={snapshot.modules.visual.text.animation}
-                  onChange={(event) => sendControl("visual", "setText", "visual-text-style", {
-                    value: snapshot.modules.visual.text.value,
-                    animation: event.target.value,
-                    reactive: snapshot.modules.visual.text.reactive
-                  })}
-                >
-                  {visualTextStyles.map((style) => <option key={style} value={style}>{style}</option>)}
-                </select>
-                <input value={manualText} onChange={(event) => setManualText(event.target.value)} />
-                <button type="submit" className={actionButtonClass("visual", "setText", "visual-text")}><Send size={15} /> {ui.actions.send}</button>
-              </form>
-            </Panel>
-          </section>
-        ) : (
-          <section className="workspace-grid workspace-grid--module">
-            <Panel title={ui.audio.title} icon={<AudioLines size={18} />}>
-              <p className="panel-lead">{ui.audio.lead}</p>
-
-              <div className="active-source">
-                <div>
-                  <span>{ui.audio.activeSource}</span>
-                  <strong>{activeSource?.displayName || (locale === "zh" ? "无音源" : "No source")}</strong>
-                </div>
-                <div className="meter">
-                  <i style={{ width: `${(activeSource?.level || 0) * 100}%` }} />
-                </div>
-              </div>
-
-              <div className="source-list">
-                {audioSources.map((source) => (
-                  <article key={source.sourceId} className={source.muted ? "source-row muted" : "source-row"}>
-                    <button type="button" className={actionButtonClass("audio", "setMute", source.sourceId)} onClick={() => sendControl("audio", "setMute", source.sourceId, !source.muted)}>
-                      {source.muted ? ui.actions.unmute : ui.actions.mute}
+              <div>
+                <div className="label"><span>{ui.visual.scene}</span></div>
+                <div className="btn-grid two">
+                  {visualScenes.map((scene) => (
+                    <button
+                      key={scene.id}
+                      type="button"
+                      className={["mini-btn", snapshot.modules.visual.scene === scene.id ? "primary" : ""].filter(Boolean).join(" ")}
+                      onClick={() => sendControl("visual", "setScene", "visual-main", scene.id)}
+                      title={scene.preset}
+                    >
+                      {scene.label}
                     </button>
-                    <div>
-                      <strong>{source.displayName}</strong>
-                      <span>{source.sourceId} · {source.speaking && !source.muted ? ui.audio.speaking : ui.audio.idle}</span>
-                    </div>
-                    <small>{Math.round(source.level * 100)}%</small>
-                  </article>
-                ))}
-              </div>
-
-              <div className="button-row">
-                {audioStyles.map((style) => (
-                  <button
-                    key={style.id}
-                    type="button"
-                    className={actionButtonClass("audio", "setStyle", "audio-style", (snapshot.modules.audio.activeStyleId || activeSource?.styleId || "default") === style.id)}
-                    onClick={() => sendControl("audio", "setStyle", "audio-style", style.id)}
-                  >
-                    {style.label}
-                  </button>
-                ))}
-                <button type="button" className={actionButtonClass("audio", "shuffleStyle", "audio-shuffle")} onClick={() => sendControl("audio", "shuffleStyle", "audio-shuffle", true)}>
-                  <Shuffle size={13} /> Shuffle
-                </button>
-              </div>
-            </Panel>
-
-            <div className="support-stack">
-              <Panel title={ui.app.showStatus} icon={<SlidersHorizontal size={18} />} compact>
-                <div className="scene-readout">
-                  <div>
-                    <span>{ui.metrics.bpm}</span>
-                    <strong>{show.bpm}</strong>
-                  </div>
-                  <div>
-                    <span>{ui.metrics.position}</span>
-                    <strong>{formatMs(show.positionMs)}</strong>
-                  </div>
-                  <div>
-                    <span>{ui.metrics.master}</span>
-                    <strong>{Math.round(snapshot.modules.audio.masterLevel * 100)}%</strong>
-                  </div>
+                  ))}
                 </div>
-              </Panel>
+              </div>
+              <div>
+                <div className="label"><span>{locale === "zh" ? "文字 / 提示" : "Text / Prompt"}</span></div>
+                <form className="field" onSubmit={(event) => {
+                  event.preventDefault();
+                  void sendControl("visual", "setText", "visual-text", {
+                    value: manualText,
+                    animation: snapshot.modules.visual.text.animation,
+                    reactive: snapshot.modules.visual.text.reactive
+                  });
+                }}>
+                  <select
+                    className="fake-select"
+                    value={snapshot.modules.visual.text.animation}
+                    onChange={(event) => sendControl("visual", "setText", "visual-text-style", {
+                      value: snapshot.modules.visual.text.value,
+                      animation: event.target.value,
+                      reactive: snapshot.modules.visual.text.reactive
+                    })}
+                  >
+                    {visualTextStyles.map((style) => <option key={style} value={style}>{style}</option>)}
+                  </select>
+                  <input value={manualText} onChange={(event) => setManualText(event.target.value)} aria-label="visual text" />
+                  <button type="submit" className="mini-btn primary"><Send size={13} /></button>
+                </form>
+              </div>
             </div>
           </section>
-        )}
+
+          <section className="module readonly" aria-label="VJ Detail Summary">
+            <div className="module-head">
+              <h2>{locale === "zh" ? "VJ 细节摘要" : "VJ Detail Summary"}</h2>
+            </div>
+            <div className="manifest">
+              <article><strong>{ui.visual.preset}</strong><span>{snapshot.modules.visual.preset} / {snapshot.modules.visual.scene}</span></article>
+              <article><strong>Colors</strong><span>{Object.entries(snapshot.modules.visual.colors).map(([name]) => name).join(", ")}</span></article>
+              <article><strong>FX</strong><span>bloom, rgb split, distortion, glitch, speed, chaos</span></article>
+              <article><strong>{locale === "zh" ? "权限" : "Authority"}</strong><span>{locale === "zh" ? "4302 VJ 可接管，4300 显示锁定。" : "If 4302 VJ takes over, 4300 shows lock reason."}</span></article>
+            </div>
+          </section>
+        </aside>
+
+        <section className="module stage" aria-label="Stage topology">
+          <div className="module-head">
+            <h2>Stage Topology</h2>
+          </div>
+          <div className="map-toolbar">
+            <div className="legend" />
+            <div className="actions">
+              {screenSelectionModes.map((mode) => {
+                const Icon = mode.id === "solid" ? Square : mode.id === "dashed" ? Grid3X3 : Maximize;
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={["cmd", screenSelectionMode === mode.id ? "read" : "pending"].join(" ")}
+                    onClick={() => {
+                      setScreenSelectionMode(mode.id);
+                      setDragBox(null);
+                      if (mode.id === "solid") clearSequence();
+                    }}
+                    title={ui.screenSelectionModes[mode.id]}
+                  >
+                    <Icon size={14} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="stage-map">
+            <div className="selection-space"></div>
+            <div
+              data-composing={routeComposerOpen ? "true" : "false"}
+              aria-label={ui.interaction.screenMap}
+              ref={screenGridRef}
+              onPointerDown={handleBoxPointerDown}
+              onPointerMove={handleBoxPointerMove}
+              onPointerUp={handleBoxPointerUp}
+              onPointerCancel={() => setDragBox(null)}
+            >
+              {screenLayoutItems.map((screen) => {
+                const route = screenRoutes[screen.id];
+                const screenClients = routeClientsByScreenId.get(screen.id) || [];
+                const isOnline = screenClients.length > 0;
+                const isSelected = snapshot.modules.interaction.screenId === screen.id;
+                return (
+                  <button
+                    key={screen.id}
+                    type="button"
+                    data-screen-id={screen.id}
+                    className={[
+                      isSelected ? "selected" : "",
+                      screen.id === "A1" ? "master" : "",
+                      route?.owner ? `owner-${route.owner}` : "",
+                      isOnline ? "is-online" : "is-offline",
+                      pendingActions.has(makeActionKey("interaction", "setScreen", screen.id)) ? "is-pending" : ""
+                    ].filter(Boolean).join(" ")}
+                    style={getScreenLayoutStyle(screen)}
+                    onClick={() => handleScreenSelect(screen.id)}
+                    title={route?.url || route?.owner || screen.id}
+                  >
+                    <i className={`dot ${isOnline ? (isSelected ? "stage" : "ok") : ""}`} />
+                    <strong>{screen.id}</strong>
+                    <span>{ui.screenOwners[route?.owner || "unset"]}</span>
+                  </button>
+                );
+              })}
+              {dragBox && <span className="selection-box" style={dragBoxStyle(dragBox)} />}
+            </div>
+          </div>
+        </section>
+
+        <aside className="col right">
+          <section className="module dj" aria-label="DJ audio controls">
+            <div className="module-head">
+              <h2>{ui.audio.title}</h2>
+            </div>
+            <div className="controls">
+              <div className="manifest">
+                <article><strong>{ui.audio.activeSource}</strong><span>{activeSource?.displayName || (locale === "zh" ? "无音源" : "No source")} · level {Math.round((activeSource?.level || 0) * 100)}%</span></article>
+                <article><strong>Transport</strong><span>{show.status}: {snapshot.modules.audio.transport}</span></article>
+                <article><strong>{ui.metrics.master}</strong><span>{Math.round(snapshot.modules.audio.masterLevel * 100)}%</span></article>
+              </div>
+              <div>
+                <div className="label"><span>{ui.audio.presets}</span></div>
+                <div className="btn-grid two">
+                  {audioStyles.map((style) => (
+                    <button
+                      key={style.id}
+                      type="button"
+                      className={["mini-btn", (snapshot.modules.audio.activeStyleId || activeSource?.styleId || "default") === style.id ? "primary" : ""].filter(Boolean).join(" ")}
+                      onClick={() => sendControl("audio", "setStyle", "audio-style", style.id)}
+                    >
+                      {style.label}
+                    </button>
+                  ))}
+                  <button type="button" className="mini-btn" onClick={() => sendControl("audio", "shuffleStyle", "audio-shuffle", true)}>
+                    <Shuffle size={12} /> Shuffle
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div className="label"><span>{ui.audio.sourceList}</span></div>
+                <div className="btn-grid two">
+                  {audioSources.slice(0, 8).map((source) => (
+                    <button
+                      key={source.sourceId}
+                      type="button"
+                      className={["mini-btn", source.muted ? "read" : ""].filter(Boolean).join(" ")}
+                      onClick={() => sendControl("audio", "setMute", source.sourceId, !source.muted)}
+                      title={`${source.displayName} · ${Math.round(source.level * 100)}%`}
+                    >
+                      {source.muted ? <><X size={10} /> {source.displayName}</> : source.displayName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="module route" aria-label="Selected object inspector">
+            <div className="module-head">
+              <h2>{locale === "zh" ? "选中对象面板" : "Selected Inspector"}</h2>
+            </div>
+            <div className="route-stack">
+              <div className="inspector-readout">
+                <div>
+                  <strong>{snapshot.modules.interaction.screenId}</strong>
+                  <span>{locale === "zh" ? "范围" : "scope"}: selected · owner: {ui.screenOwners[screenRoutes[snapshot.modules.interaction.screenId]?.owner || "unset"]}</span>
+                </div>
+                <span className="chip"><i className={`dot ${routeClientsByScreenId.get(snapshot.modules.interaction.screenId)?.length ? "stage" : ""}`} />{routeClientsByScreenId.get(snapshot.modules.interaction.screenId)?.length ? "online" : "offline"}</span>
+              </div>
+
+              <div>
+                <div className="label"><span>{locale === "zh" ? "路由预设" : "Route Preset"}</span></div>
+                <div className="btn-grid three">
+                  {screenRoutePresets.map((preset) => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      className={["mini-btn", snapshot.modules.interaction.screenRoutePreset === preset.value ? "primary" : ""].filter(Boolean).join(" ")}
+                      onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
+                    >
+                      {ui.screenRoutePresets[preset.value]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="label"><span>{locale === "zh" ? "面板 Owner" : "Owner for Scope"}</span></div>
+                <div className="btn-grid four">
+                  {(["vj", "baofa", "off", "diagnostic"] as ScreenOwner[]).map((owner) => (
+                    <button
+                      key={owner}
+                      type="button"
+                      className={["mini-btn", screenRoutes[snapshot.modules.interaction.screenId]?.owner === owner ? "primary" : ""].filter(Boolean).join(" ")}
+                      onClick={() => sendControl("interaction", "setScreenOwner", snapshot.modules.interaction.screenId, owner)}
+                    >
+                      {ui.screenOwners[owner]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="label"><span>{locale === "zh" ? "呈现" : "Presentation"}</span></div>
+                <div className="btn-grid two">
+                  <button type="button" className={["mini-btn", screenPresentation.autoRedirect ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}>{locale === "zh" ? "自动跳转" : "Auto Redirect"}</button>
+                  <button type="button" className={["mini-btn", screenPresentation.showMenu ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}>{locale === "zh" ? "显示菜单" : "Show Menu"}</button>
+                  <button type="button" className={["mini-btn", screenPresentation.showDebug ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}>{locale === "zh" ? "调试" : "Debug"}</button>
+                  <button type="button" className={["mini-btn", screenPresentation.cameraEnabled ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setScreenCameraEnabled", "screen-camera", !screenPresentation.cameraEnabled)}>{locale === "zh" ? "摄像头" : "Camera"}</button>
+                </div>
+              </div>
+
+              <div>
+                <div className="label"><span>Baofa Engine</span></div>
+                <div className="btn-grid two">
+                  <button type="button" className={["mini-btn", snapshot.modules.interaction.visualMode === "tree" ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}>Tree</button>
+                  <button type="button" className={["mini-btn", snapshot.modules.interaction.visualMode === "firework" ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}>Firework</button>
+                  {snapshot.modules.interaction.visualMode === "tree" ? (
+                    <>
+                      {["idle", "flow", "interaction", "climax"].map((mode) => (
+                        <button key={mode} type="button" className={["mini-btn", snapshot.modules.interaction.mode === mode ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => triggerInteractionMode(mode)}>
+                          {ui.interactionModes[mode]}
+                        </button>
+                      ))}
+                      <button type="button" className="mini-btn" onClick={() => { clearSequence(); void sendControl("interaction", "resetTree", "tree-reset", true); }}>{locale === "zh" ? "重置" : "Reset Tree"}</button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className={["mini-btn", fireworkState === "standby" ? "primary" : ""].filter(Boolean).join(" ")} onClick={standbyFireworks}>Standby</button>
+                      <button type="button" className={["mini-btn", fireworkState === "launching" ? "primary" : ""].filter(Boolean).join(" ")} onClick={launchFireworks}>Launch</button>
+                      <button type="button" className={["mini-btn", fireworkState === "resetting" ? "primary" : ""].filter(Boolean).join(" ")} onClick={resetFireworks}>Reset</button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="label"><span>{locale === "zh" ? "鱼/烟花状态" : "Fish / Firework State"}</span></div>
+                <div className="btn-grid three">
+                  <button type="button" className={["mini-btn", baofaFishState === "idle" ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle")}>Idle</button>
+                  <button type="button" className={["mini-btn", baofaFishState === "running" ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "running")}>Run</button>
+                  <button type="button" className={["mini-btn", baofaFishState === "roam" ? "primary" : ""].filter(Boolean).join(" ")} onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", "roam")}>Roam</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </aside>
       </section>
+
+      <footer className="dock" aria-label="Event dock">
+        <div className="actions">
+          <span className="chip"><small>BPM</small><strong>{snapshot.modules.audio.bpm}</strong></span>
+          <span className="chip"><small>{locale === "zh" ? "场景" : "Scene"}</small><strong>{snapshot.modules.visual.scene}</strong></span>
+          <span className="chip"><small>{locale === "zh" ? "预设" : "Preset"}</small><strong>{snapshot.modules.visual.preset}</strong></span>
+        </div>
+        <div className="events">
+          {visibleHeaderEventLog.length > 0 ? visibleHeaderEventLog.slice(0, 3).map((event) => (
+            <article key={event.id} className="event">
+              <span>{new Date(event.timestamp).toLocaleTimeString()}</span>
+              <strong>{event.type}</strong>
+              <p>{event.message}</p>
+            </article>
+          )) : (
+            <article className="event">
+              <span>--:--:--</span>
+              <strong>eventLog</strong>
+              <p>{ui.status.waiting}</p>
+            </article>
+          )}
+        </div>
+        <div className="actions">
+          <span className="chip">{locale === "zh" ? "只读日志" : "Read-only log"}</span>
+        </div>
+      </footer>
 
       {settingsOpen && (
         <div
@@ -1975,8 +1473,8 @@ function App() {
                 <h2 id="settings-dialog-title">{ui.layout.systemSettings}</h2>
                 <span>
                   {locale === "zh"
-                    ? "系统外观、语言和控制令牌集中在这里，主面板只保留高频操作。"
-                    : "Theme, language, and control token are centralized here. The main deck keeps only high-frequency actions."}
+                    ? "系统外观、语言和控制令牌集中在这里。"
+                    : "Theme, language, and control token."}
                 </span>
               </div>
               <button
@@ -2076,7 +1574,7 @@ function App() {
   );
 }
 
-function ScreenGateway({ screenId }: { screenId: string }) {
+const ScreenGateway = React.memo(function ScreenGateway({ screenId }: { screenId: string }) {
   const [snapshot, setSnapshot] = React.useState<PerformanceState | null>(null);
   const [connection, setConnection] = React.useState<ConnectionState>("connecting");
   const [message, setMessage] = React.useState("Resolving route");
@@ -2092,60 +1590,26 @@ function ScreenGateway({ screenId }: { screenId: string }) {
 
   React.useEffect(() => {
     let closed = false;
-    let socket: WebSocket | null = null;
-    let reconnectTimer: number | null = null;
+    fetchInitialState()
+      .then(state => { if (!closed) setSnapshot(state); })
+      .catch(() => { if (!closed) { setConnection("offline"); setMessage("4300 API unavailable"); } });
+    return () => { closed = true; };
+  }, []);
 
-    async function boot() {
-      try {
-        const state = await fetchJson<PerformanceState>(apiUrl("/api/state"));
-        if (!closed) setSnapshot(state);
-      } catch {
-        if (!closed) {
-          setConnection("offline");
-          setMessage("4300 API unavailable");
-        }
+  useWebSocket(
+    `screen-gateway-${screenId}`,
+    ["state.read", "screen.route"],
+    (message) => {
+      if (isStateSnapshot(message)) setSnapshot(message.state);
+      if (isStatePatch(message)) {
+        setSnapshot((current) => message.state || (current ? applyStatePatch(current, message) : current));
       }
-      connect();
-    }
-
-    function connect() {
-      if (closed) return;
-      setConnection("connecting");
-      socket = new WebSocket(webSocketUrl("/ws"));
-      socket.addEventListener("open", () => {
-        setConnection("connected");
-        socket?.send(JSON.stringify({
-          type: "client.hello",
-          clientId: `screen-gateway-${screenId}`,
-          module: "dashboard",
-          role: "screen-gateway",
-          capabilities: ["state.read", "screen.route"]
-        }));
-      });
-      socket.addEventListener("message", (event) => {
-        const serverMessage = JSON.parse(event.data) as ServerMessage;
-        if (isStateSnapshot(serverMessage)) setSnapshot(serverMessage.state);
-        if (isStatePatch(serverMessage)) {
-          setSnapshot((current) => serverMessage.state || (current ? applyStatePatch(current, serverMessage) : current));
-        }
-        if (isShowPatch(serverMessage)) {
-          setSnapshot((current) => current ? applyShowPatch(current, serverMessage) : current);
-        }
-      });
-      socket.addEventListener("close", () => {
-        if (closed) return;
-        setConnection("offline");
-        reconnectTimer = window.setTimeout(connect, 1200);
-      });
-    }
-
-    void boot();
-    return () => {
-      closed = true;
-      if (reconnectTimer) window.clearTimeout(reconnectTimer);
-      socket?.close();
-    };
-  }, [screenId]);
+      if (isShowPatch(message)) {
+        setSnapshot((current) => current ? applyShowPatch(current, message) : current);
+      }
+    },
+    setConnection
+  );
 
   React.useEffect(() => {
     if (!snapshot) return;
@@ -2199,9 +1663,9 @@ function ScreenGateway({ screenId }: { screenId: string }) {
       </section>
     </main>
   );
-}
+});
 
-function Panel({
+const Panel = React.memo(function Panel({
   id,
   title,
   icon,
@@ -2227,119 +1691,7 @@ function Panel({
       {children}
     </section>
   );
-}
-
-function isStateSnapshot(message: ServerMessage): message is Extract<ServerMessage, { type: "state.snapshot" }> {
-  return message.type === "state.snapshot";
-}
-
-function isStatePatch(message: ServerMessage): message is Extract<ServerMessage, { type: "state.patch" }> {
-  return message.type === "state.patch";
-}
-
-function isShowPatch(message: ServerMessage): message is Extract<ServerMessage, { type: "show.patch" }> {
-  return message.type === "show.patch";
-}
-
-function applyStatePatch(state: PerformanceState, message: Extract<ServerMessage, { type: "state.patch" }>): PerformanceState {
-  const { audioSources, ...modulePatch } = message.patch;
-  return {
-    ...state,
-    updatedAt: message.updatedAt || Date.now(),
-    audioSources: isPlainRecord(audioSources)
-      ? mergePatch(state.audioSources, audioSources)
-      : state.audioSources,
-    modules: {
-      ...state.modules,
-      [message.module]: mergePatch(state.modules[message.module], modulePatch)
-    }
-  };
-}
-
-function applyShowPatch(state: PerformanceState, message: Extract<ServerMessage, { type: "show.patch" }>): PerformanceState {
-  return {
-    ...state,
-    updatedAt: message.updatedAt || Date.now(),
-    show: mergePatch(state.show, message.patch as unknown as Record<string, unknown>)
-  };
-}
-
-function mergePatch<T>(target: T, patch: Record<string, unknown>): T {
-  if (!isPlainRecord(target)) return patch as T;
-  const next: Record<string, unknown> = { ...target };
-  for (const [key, value] of Object.entries(patch)) {
-    if (isPlainRecord(value) && isPlainRecord(next[key])) {
-      next[key] = mergePatch(next[key], value);
-    } else {
-      next[key] = value;
-    }
-  }
-  return next as T;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isControlAck(message: ServerMessage): message is Extract<ServerMessage, { type: "control.ack" }> {
-  return message.type === "control.ack";
-}
-
-function isErrorMessage(message: ServerMessage): message is Extract<ServerMessage, { type: "error" }> {
-  return message.type === "error";
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-  return response.json() as Promise<T>;
-}
-
-function apiUrl(path: string) {
-  const backendUrl = configuredShowBackendUrl || (isPublicRuntime() ? hostedShowBackendUrl : "");
-  return withRoom(backendUrl ? `${backendUrl}${path}` : path);
-}
-
-function webSocketUrl(path: string) {
-  if (configuredShowWsUrl) return withRoom(configuredShowWsUrl);
-  const backendUrl = configuredShowBackendUrl || (isPublicRuntime() ? hostedShowBackendUrl : "");
-  if (backendUrl) {
-    const url = new URL(path, backendUrl);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    return withRoom(url.toString());
-  }
-  if (isPublicRuntime()) return withRoom(hostedShowWsUrl);
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return withRoom(`${protocol}://${window.location.host}${path}`);
-}
-
-function isPublicRuntime() {
-  if (typeof window === "undefined") return false;
-  const host = window.location.hostname.toLowerCase();
-  return !(
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "0.0.0.0" ||
-    host.endsWith(".local") ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-  );
-}
-
-function currentRoom() {
-  if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get("room") || new URLSearchParams(window.location.search).get("showId") || "";
-}
-
-function withRoom(path: string) {
-  const room = currentRoom().trim();
-  if (!room) return path;
-  const absolute = /^[a-z][a-z\d+.-]*:\/\//i.test(path);
-  const url = new URL(path, window.location.origin);
-  url.searchParams.set("room", room);
-  return absolute ? url.toString() : `${url.pathname}${url.search}`;
-}
+});
 
 function isLocalRouteHostname(hostname: string) {
   const normalized = hostname.toLowerCase();
