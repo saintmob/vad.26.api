@@ -135,6 +135,13 @@ export interface AudioModuleState {
 
 export interface VisualModuleState {
   status: ModuleStatus;
+  controlAuthority: {
+    owner: "show-control" | "vj";
+    source: string | null;
+    lastVjAt: number | null;
+    activeUntil: number | null;
+    fallbackAfterMs: number;
+  };
   scene: string;
   preset: string;
   colors: {
@@ -248,6 +255,7 @@ export interface ClientHelloMessage {
   clientId?: string;
   module?: string;
   role?: string;
+  screenId?: string;
   capabilities?: string[];
   token?: string;
 }

@@ -10,11 +10,13 @@ import {
   MODULE_NAMES,
   ModuleName,
   PerformanceState,
+  ScreenRegistryEntry,
   ScreenRouteArrangementPreset,
   ScreenOwner,
   ScreenRouteEntry,
   BuiltInScreenRoutePreset,
   ScreenRoutePreset,
+  VisualModuleState,
   VisualScreenState
 } from "./types.js";
 
@@ -41,8 +43,8 @@ const SCREEN_TOPOLOGY = [
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
 const BUILT_IN_SCREEN_ROUTE_PRESETS: BuiltInScreenRoutePreset[] = ["balanced", "vj_takeover", "baofa_takeover"];
-const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
-const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
+const HOSTED_VJ_SCREEN_ORIGIN = process.env.VJ_SCREEN_ORIGIN || "https://doit-pearl.vercel.app";
+const HOSTED_BAOFA_SCREEN_ORIGIN = process.env.BAOFA_SCREEN_ORIGIN || "https://baofa.vercel.app";
 const VISUAL_SCENE_PRESETS: Record<string, string> = {
   "Video Flow": "Video Flow",
   "Layered Stage": "Layered Stage",
@@ -57,6 +59,7 @@ const VISUAL_SCENE_PRESETS: Record<string, string> = {
   Cyber: "Cyberpunk"
 };
 const VISUAL_SCENE_IDS = Object.keys(VISUAL_SCENE_PRESETS);
+const VISUAL_AUTHORITY_FALLBACK_MS = 15_000;
 const CONFIGURED_SCREEN_ROUTE_ORIGIN = (() => {
   const origin = normalizeScreenRouteOrigin(process.env.SHOW_SCREEN_ROUTE_ORIGIN || process.env.SHOW_PUBLIC_ORIGIN);
   return origin ? `${origin.protocol}//${origin.host}` : null;
@@ -74,6 +77,17 @@ function normalizeScreenOccupancyId(value: unknown) {
   const screenId = String(value || "").trim();
   if (!screenId) return "";
   return screenId === "MASTER" ? "A1" : screenId;
+}
+
+function inferScreenIdFromClientId(value: unknown) {
+  const text = String(value || "").toUpperCase();
+  if (!text) return "";
+  for (const screenId of SCREEN_IDS) {
+    const escaped = screenId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^A-Z0-9])${escaped}($|[^A-Z0-9])`).test(text)) return screenId;
+  }
+  if (/(^|[^A-Z0-9])MASTER($|[^A-Z0-9])/.test(text)) return "A1";
+  return "";
 }
 
 export function isModuleName(value: unknown): value is ModuleName {
@@ -133,6 +147,7 @@ export function createDefaultState(now = Date.now()): PerformanceState {
       },
       visual: {
         status: "online",
+        controlAuthority: createDefaultVisualControlAuthority(),
         scene: "Cyber",
         preset: "Cyberpunk",
         colors: {
@@ -382,7 +397,10 @@ export class ShowStateStore {
 
   applyModulePatch(moduleName: ModuleName, patch: JsonRecord, source = "module"): PerformanceState {
     const sanitizedPatch = moduleName === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
-    mergePatch(this.state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
+    (this.state.modules as unknown as JsonRecord)[moduleName] = mergePatch(this.state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
+    if (moduleName === "visual" && isVjVisualSource(source)) {
+      markVisualAuthorityFromVj(this.state, source);
+    }
     if (moduleName === "audio" && typeof patch.masterLevel === "number") {
       this.state.modules.audio.masterLevel = clampUnit(patch.masterLevel, this.state.modules.audio.masterLevel);
     }
@@ -425,6 +443,13 @@ export class ShowStateStore {
 
   applyControlCommand(command: ControlCommand): PerformanceState {
     applyCommand(this.state, command);
+    if (command.module === "visual" || command.module === "video") {
+      if (isVjVisualSource(command.issuedBy)) {
+        markVisualAuthorityFromVj(this.state, command.issuedBy);
+      } else {
+        markVisualAuthorityFromShowControl(this.state, command.issuedBy);
+      }
+    }
     this.state.commandLog.unshift(command);
     this.state.commandLog = this.state.commandLog.slice(0, 80);
     this.touch();
@@ -436,16 +461,27 @@ export class ShowStateStore {
   }
 
   canApplyControlCommand(command: ControlCommand): boolean {
-    if (command.command === "setOperationLock") return isCentralControlSource(command.issuedBy);
-    if (isCentralControlSource(command.issuedBy)) return true;
+    return !this.getControlCommandBlockReason(command);
+  }
+
+  getControlCommandBlockReason(command: ControlCommand): string | null {
+    if (command.command === "setOperationLock") return isCentralControlSource(command.issuedBy) ? null : "Operation lock active";
     const moduleName = normalizeLockModule(command.module);
-    if (!moduleName) return true;
-    return !this.state.operationLock.lockedModules.includes(moduleName);
+    if (!isCentralControlSource(command.issuedBy) && moduleName && this.state.operationLock.lockedModules.includes(moduleName)) return "Operation lock active";
+    if ((command.module === "visual" || command.module === "video") && shouldDeferVisualControlToVj(this.state, command.issuedBy)) {
+      return "VJ control active";
+    }
+    return null;
   }
 
   canApplyModulePatch(moduleName: ModuleName, source = "module"): boolean {
-    if (isCentralControlSource(source)) return true;
-    return !this.state.operationLock.lockedModules.includes(moduleName);
+    return !this.getModulePatchBlockReason(moduleName, source);
+  }
+
+  getModulePatchBlockReason(moduleName: ModuleName, source = "module"): string | null {
+    if (!isCentralControlSource(source) && this.state.operationLock.lockedModules.includes(moduleName)) return "Operation lock active";
+    if (moduleName === "visual" && shouldDeferVisualControlToVj(this.state, source)) return "VJ control active";
+    return null;
   }
 
   registerClient(message: ClientHelloMessage, fallbackId: string): ClientInfo {
@@ -462,7 +498,9 @@ export class ShowStateStore {
       lastSeen: now,
       latency: null,
       capabilities: Array.isArray(message.capabilities) ? message.capabilities.map(String) : [],
-      screenId: normalizeScreenOccupancyId(this.state.clients[message.clientId || fallbackId]?.screenId),
+      screenId: normalizeScreenOccupancyId(message.screenId)
+        || normalizeScreenOccupancyId(this.state.clients[message.clientId || fallbackId]?.screenId)
+        || inferScreenIdFromClientId(message.clientId || fallbackId),
       overview: this.state.clients[message.clientId || fallbackId]?.overview
     };
     this.state.clients[client.id] = client;
@@ -574,15 +612,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     }
     if (command.command === "setPreset") state.modules.visual.preset = String(value || command.target);
     if (command.command === "setText") {
-      if (isRecord(value)) mergePatch(state.modules.visual.text as unknown as JsonRecord, value);
+      if (isRecord(value)) state.modules.visual.text = mergePatch(state.modules.visual.text as unknown as JsonRecord, value) as VisualModuleState["text"];
       else state.modules.visual.text.value = String(value || "");
     }
     if (command.command === "setAudioDrive" && ["mic", "music", "api", "hybrid"].includes(String(value))) {
       state.modules.visual.audioDriveMode = (String(value) === "hybrid" ? "api" : String(value)) as "mic" | "music" | "api";
     }
     if (command.command === "setFullscreen") state.modules.visual.fullscreen = Boolean(value);
-    if (command.command === "setColors" && isRecord(value)) mergePatch(state.modules.visual.colors as unknown as JsonRecord, value);
-    if (command.command === "setFx" && isRecord(value)) mergePatch(state.modules.visual.fx as unknown as JsonRecord, value);
+    if (command.command === "setColors" && isRecord(value)) state.modules.visual.colors = mergePatch(state.modules.visual.colors as unknown as JsonRecord, value) as VisualModuleState["colors"];
+    if (command.command === "setFx" && isRecord(value)) state.modules.visual.fx = mergePatch(state.modules.visual.fx as unknown as JsonRecord, value) as VisualModuleState["fx"];
   }
 
   if (command.module === "interaction") {
@@ -650,7 +688,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       const preset = normalizeScreenRoutePreset(value || command.target);
       if (preset) {
         const customPreset = state.modules.interaction.customScreenRoutePresets.find((entry) => entry.id === preset);
-        if (customPreset) applyScreenRouteArrangement(state, customPreset, Date.now());
+        if (customPreset) applyScreenRouteArrangement(state, customPreset, Date.now(), { applyVisualScenes: !isVisualAuthorityActive(state) });
         else if (isBuiltInScreenRoutePreset(preset)) {
           state.modules.interaction.screenRoutePreset = preset;
           state.modules.interaction.screenRoutes = createScreenRoutesForPreset(preset, Date.now());
@@ -665,7 +703,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
           ...state.modules.interaction.customScreenRoutePresets.filter((entry) => entry.id !== preset.id),
           preset
         ];
-        applyScreenRouteArrangement(state, preset, now);
+        applyScreenRouteArrangement(state, preset, now, { applyVisualScenes: !isVisualAuthorityActive(state) });
       }
     }
     if (command.command === "deleteScreenRouteArrangement") {
@@ -708,7 +746,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
   }
 }
 
-function normalizeBands(value: unknown) {
+function normalizeBands(value: unknown): number[] {
   if (!Array.isArray(value)) return DEFAULT_BANDS;
   return value.slice(0, 32).map((item) => clampUnit(item));
 }
@@ -727,6 +765,7 @@ function normalizePerformanceState(state: PerformanceState): PerformanceState {
   state.modules.audio.bpm = positiveNumber(state.modules.audio.bpm, state.show.bpm || 120);
   state.modules.audio.masterLevel = clampUnit(state.modules.audio.masterLevel, 0.42);
   state.modules.visual.audioDriveMode = normalizeVisualAudioDriveMode(state.modules.visual.audioDriveMode);
+  state.modules.visual.controlAuthority = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
   state.modules.visual.visualScreens = normalizeVisualScreens(state.modules.visual.visualScreens);
   state.modules.interaction.screenTopology = normalizeScreenTopology(state.modules.interaction.screenTopology);
   state.modules.interaction.screenRegistry = normalizeScreenRegistry(state.modules.interaction.screenRegistry);
@@ -760,6 +799,12 @@ function isCentralControlSource(source: unknown): boolean {
   return normalized.includes("dashboard") || normalized.includes("central") || normalized.includes("control-room") || normalized.includes("中控");
 }
 
+function isVjVisualSource(source: unknown): boolean {
+  const normalized = String(source || "").toLowerCase();
+  if (!normalized) return false;
+  return normalized.includes("vj") || normalized.includes("visual") || normalized.includes("4302");
+}
+
 function normalizeLockModule(value: unknown): ModuleName | null {
   if (value === "video") return "visual";
   return isModuleName(value) ? value : null;
@@ -768,6 +813,54 @@ function normalizeLockModule(value: unknown): ModuleName | null {
 function normalizeVisualAudioDriveMode(value: unknown): "mic" | "music" | "api" {
   if (value === "hybrid") return "api";
   return value === "mic" || value === "music" || value === "api" ? value : "mic";
+}
+
+function normalizeVisualControlAuthority(value: unknown): VisualModuleState["controlAuthority"] {
+  const record = isRecord(value) ? value : {};
+  const fallbackAfterMs = Math.max(1_000, Math.round(positiveNumber(record.fallbackAfterMs, VISUAL_AUTHORITY_FALLBACK_MS)));
+  return {
+    owner: record.owner === "vj" ? "vj" : "show-control",
+    source: typeof record.source === "string" && record.source.trim() ? record.source.trim() : null,
+    lastVjAt: nullableTimestamp(record.lastVjAt),
+    activeUntil: nullableTimestamp(record.activeUntil),
+    fallbackAfterMs
+  };
+}
+
+function nullableTimestamp(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function isVisualAuthorityActive(state: PerformanceState, now = Date.now()) {
+  const authority = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
+  return authority.owner === "vj" && typeof authority.activeUntil === "number" && authority.activeUntil > now;
+}
+
+function shouldDeferVisualControlToVj(state: PerformanceState, source: unknown) {
+  return !isVjVisualSource(source) && isVisualAuthorityActive(state);
+}
+
+function markVisualAuthorityFromVj(state: PerformanceState, source: unknown, now = Date.now()) {
+  const current = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
+  state.modules.visual.controlAuthority = {
+    owner: "vj",
+    source: String(source || "vj-4302"),
+    lastVjAt: now,
+    activeUntil: now + current.fallbackAfterMs,
+    fallbackAfterMs: current.fallbackAfterMs
+  };
+}
+
+function markVisualAuthorityFromShowControl(state: PerformanceState, source: unknown) {
+  const current = normalizeVisualControlAuthority(state.modules.visual.controlAuthority);
+  if (isVisualAuthorityActive(state)) return;
+  state.modules.visual.controlAuthority = {
+    owner: "show-control",
+    source: String(source || "show-control"),
+    lastVjAt: current.lastVjAt,
+    activeUntil: null,
+    fallbackAfterMs: current.fallbackAfterMs
+  };
 }
 
 function normalizeLockedModules(value: unknown): ModuleName[] {
@@ -806,20 +899,20 @@ function normalizeScreenPresentation(value: unknown): InteractionModuleState["sc
   };
 }
 
-function normalizeFireworkState(value: unknown) {
+function normalizeFireworkState(value: unknown): InteractionModuleState["fireworkState"] {
   return ["standby", "launching", "resetting"].includes(String(value)) ? String(value) as InteractionModuleState["fireworkState"] : "standby";
 }
 
-function normalizeBaofaFishState(value: unknown) {
-  if (String(value) === "roam") return "roam" as const;
-  return String(value) === "running" ? "running" as const : "idle" as const;
+function normalizeBaofaFishState(value: unknown): InteractionModuleState["baofaFishState"] {
+  if (String(value) === "roam") return "roam";
+  return String(value) === "running" ? "running" : "idle";
 }
 
-function normalizeTreePhase(value: unknown) {
+function normalizeTreePhase(value: unknown): InteractionModuleState["treePhase"] {
   return ["idle", "growing", "bright", "fading"].includes(String(value)) ? String(value) as InteractionModuleState["treePhase"] : "idle";
 }
 
-function isLoopbackOrigin(origin: unknown) {
+function isLoopbackOrigin(origin: unknown): boolean {
   try {
     const url = new URL(String(origin || ""));
     return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
@@ -828,7 +921,7 @@ function isLoopbackOrigin(origin: unknown) {
   }
 }
 
-function createDefaultScreenRegistry() {
+function createDefaultScreenRegistry(): ScreenRegistryEntry[] {
   return SCREEN_IDS.map((id, index) => ({
     id,
     label: `Screen ${id}`,
@@ -845,6 +938,16 @@ function createDefaultVisualScreens(): VisualScreenState[] {
     scene: index === 0 ? "Layered Stage" : index % 4 === 1 ? "Topology" : index % 4 === 2 ? "Pulse" : "Liquid",
     enabled: true
   }));
+}
+
+function createDefaultVisualControlAuthority(): VisualModuleState["controlAuthority"] {
+  return {
+    owner: "show-control",
+    source: null,
+    lastVjAt: null,
+    activeUntil: null,
+    fallbackAfterMs: VISUAL_AUTHORITY_FALLBACK_MS
+  };
 }
 
 function createScreenRoutesForPreset(preset: ScreenRoutePreset, now: number): Record<string, ScreenRouteEntry> {
@@ -992,8 +1095,7 @@ function normalizeVisualDevice(value: unknown): VisualScreenState["device"] | nu
 
 function normalizeVisualScene(value: unknown): string | null {
   const scene = String(value || "").trim();
-  if (!scene) return null;
-  return VISUAL_SCENE_IDS.includes(scene) ? scene : scene;
+  return scene || null;
 }
 
 function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
@@ -1082,7 +1184,12 @@ function normalizeScreenRouteArrangement(value: unknown, now: number, state: Per
   };
 }
 
-function applyScreenRouteArrangement(state: PerformanceState, preset: ScreenRouteArrangementPreset, now: number) {
+function applyScreenRouteArrangement(
+  state: PerformanceState,
+  preset: ScreenRouteArrangementPreset,
+  now: number,
+  options: { applyVisualScenes?: boolean } = {}
+) {
   const routes: Record<string, ScreenRouteEntry> = {};
   for (const screenId of SCREEN_IDS) {
     const owner = normalizeScreenOwner(preset.routes[screenId]) || "baofa";
@@ -1090,6 +1197,7 @@ function applyScreenRouteArrangement(state: PerformanceState, preset: ScreenRout
   }
   state.modules.interaction.screenRoutePreset = preset.id;
   state.modules.interaction.screenRoutes = routes;
+  if (options.applyVisualScenes === false) return;
   state.modules.visual.visualScreens = normalizeVisualScreens(
     state.modules.visual.visualScreens.map((screen) => {
       const scene = preset.vjScenes[screen.id];
@@ -1171,13 +1279,22 @@ function isRecord(value: unknown): value is JsonRecord {
 }
 
 function mergePatch<T extends JsonRecord>(target: T, patch: JsonRecord): T {
+  const next = { ...target };
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    if (isRecord(value) && isRecord(target[key])) {
-      mergePatch(target[key] as JsonRecord, value);
+    if (isRecord(value) && isRecord(next[key])) {
+      next[key as keyof T] = mergePatch(next[key] as JsonRecord, value) as T[keyof T];
     } else {
-      target[key as keyof T] = value as T[keyof T];
+      next[key as keyof T] = value as T[keyof T];
     }
   }
-  return target;
+  return next;
+}
+
+export function emptyAudioSummary() {
+  return {
+    volume: 0, subBass: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, treble: 0,
+    energy: 0, beat: 0, spectralCentroid: 0, spectralFlux: 0, transient: 0,
+    dynamicRange: 0, syncedSignal: 0
+  };
 }

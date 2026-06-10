@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const workerOrigin = "https://vad-26-show-control.saintmob.workers.dev";
+const workerOrigin = process.env.WORKER_ORIGIN || "https://vad-26-show-control.saintmob.workers.dev";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {

@@ -3,7 +3,7 @@
 !.env.example
 .git/
 .playwright-mcp/
-data/
+/data/
 dist/
 node_modules/
 tasks/

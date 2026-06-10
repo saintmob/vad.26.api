@@ -54,13 +54,16 @@ function expectedScreenRouteUrl(baseUrl: string, port: number, screenId: string)
 
 function createWorkerRoom(initialState?: PerformanceState) {
   const storage = new Map<string, unknown>();
-  if (initialState) storage.set("state", initialState);
+  if (initialState) storage.set("state", structuredClone(initialState));
   let initialized = Promise.resolve();
   const ctx = {
     storage: {
-      get: async <T>(key: string) => storage.get(key) as T | undefined,
+      get: async <T>(key: string) => {
+        const value = storage.get(key);
+        return value === undefined ? undefined : structuredClone(value) as T;
+      },
       put: async <T>(key: string, value: T) => {
-        storage.set(key, value);
+        storage.set(key, structuredClone(value));
       }
     },
     blockConcurrencyWhile: (callback: () => Promise<void>) => {
@@ -473,6 +476,172 @@ test("cloudflare durable object saves, applies, and deletes custom screen route 
   assert.equal(deleteBody.state.modules.interaction.screenRoutes.B1.owner, "baofa");
 });
 
+test("cloudflare durable object enforces operation lock", async () => {
+  const { room, initialized } = createWorkerRoom();
+  await initialized;
+
+  const rejectedLock = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "visual",
+      command: "setOperationLock",
+      value: { module: "visual", locked: true },
+      issuedBy: "vj"
+    })
+  }));
+  assert.equal(rejectedLock.status, 423);
+
+  const locked = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "interaction",
+      target: "visual",
+      command: "setOperationLock",
+      value: { module: "visual", locked: true },
+      issuedBy: "dashboard-main"
+    })
+  }));
+  const lockedBody = await locked.json();
+  assert.equal(locked.status, 202);
+  assert.deepEqual(lockedBody.state.operationLock.lockedModules, ["visual"]);
+
+  const rejectedCommand = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "visual",
+      target: "visual-main",
+      command: "setScene",
+      value: "Pulse",
+      issuedBy: "vj"
+    })
+  }));
+  const rejectedCommandBody = await rejectedCommand.json();
+  assert.equal(rejectedCommand.status, 423);
+  assert.equal(rejectedCommandBody.error, "Operation lock active");
+
+  const rejectedPatch = await room.fetch(new Request("https://worker.example/api/modules/visual/state?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      source: "vj",
+      patch: { scene: "Bypass" }
+    })
+  }));
+  assert.equal(rejectedPatch.status, 423);
+
+  const dashboardPatch = await room.fetch(new Request("https://worker.example/api/modules/visual/state?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      source: "dashboard-main",
+      patch: { scene: "Dashboard Bypass" }
+    })
+  }));
+  assert.equal(dashboardPatch.status, 202);
+});
+
+test("cloudflare durable object keeps high-frequency audio out of persisted snapshots", async () => {
+  const { room, initialized, storage } = createWorkerRoom();
+  await initialized;
+
+  const response = await room.fetch(new Request("https://worker.example/api/mixer/frame?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      type: "mixer.audioFrame",
+      sourceId: "dj-live",
+      displayName: "DJ Live",
+      level: 0.84
+    })
+  }));
+  const body = await response.json();
+  const storedState = storage.get("state") as PerformanceState;
+
+  assert.equal(response.status, 202);
+  assert.equal(body.state.audioSources["dj-live"].level, 0.84);
+  assert.equal(storedState.audioSources["dj-live"], undefined);
+});
+
+test("cloudflare durable object defers visual controls to active 4302", async () => {
+  const { room, initialized } = createWorkerRoom();
+  await initialized;
+
+  const vjPatch = await room.fetch(new Request("https://worker.example/api/modules/visual/state?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      source: "vj-4302",
+      patch: { scene: "Topology", preset: "Sonic Topology" }
+    })
+  }));
+  const vjBody = await vjPatch.json();
+  assert.equal(vjPatch.status, 202);
+  assert.equal(vjBody.state.modules.visual.scene, "Topology");
+  assert.equal(vjBody.state.modules.visual.controlAuthority.owner, "vj");
+
+  const dashboardVisual = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "visual",
+      target: "visual-main",
+      command: "setScene",
+      value: "Pulse",
+      issuedBy: "dashboard-main"
+    })
+  }));
+  const dashboardBody = await dashboardVisual.json();
+  assert.equal(dashboardVisual.status, 409);
+  assert.equal(dashboardBody.error, "VJ control active");
+  assert.equal(dashboardBody.state.modules.visual.scene, "Topology");
+
+  const vjControl = await room.fetch(new Request("https://worker.example/api/control?room=wan-main", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-control-token": "test-token"
+    },
+    body: JSON.stringify({
+      module: "visual",
+      target: "visual-main",
+      command: "setScene",
+      value: "Liquid",
+      issuedBy: "vj-4302"
+    })
+  }));
+  const vjControlBody = await vjControl.json();
+  assert.equal(vjControl.status, 202);
+  assert.equal(vjControlBody.state.modules.visual.scene, "Liquid");
+});
+
 test("updates screen presentation controls", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/control`, {
@@ -649,6 +818,89 @@ test("accepts module state patches", async () => {
     assert.equal(body.state.modules.visual.text.value, "LIVE");
     assert.equal(body.state.eventLog[0].type, "module.statePatch");
   });
+});
+
+test("defers 4300 visual controls while 4302 is actively driving visuals", async () => {
+  await withServer(async (baseUrl) => {
+    const vjPatch = await fetch(`${baseUrl}/api/modules/visual/state`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        source: "vj-4302",
+        patch: { scene: "Topology", preset: "Sonic Topology" }
+      })
+    });
+    const vjBody = await vjPatch.json();
+
+    assert.equal(vjPatch.status, 202);
+    assert.equal(vjBody.state.modules.visual.scene, "Topology");
+    assert.equal(vjBody.state.modules.visual.controlAuthority.owner, "vj");
+
+    const dashboardVisual = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Pulse",
+        issuedBy: "dashboard-main"
+      })
+    });
+    const dashboardBody = await dashboardVisual.json();
+
+    assert.equal(dashboardVisual.status, 409);
+    assert.equal(dashboardBody.error, "VJ control active");
+    assert.equal(dashboardBody.state.modules.visual.scene, "Topology");
+
+    const vjControl = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Liquid",
+        issuedBy: "vj-4302"
+      })
+    });
+    const vjControlBody = await vjControl.json();
+
+    assert.equal(vjControl.status, 202);
+    assert.equal(vjControlBody.state.modules.visual.scene, "Liquid");
+    assert.equal(vjControlBody.state.modules.visual.controlAuthority.owner, "vj");
+  });
+});
+
+test("allows 4300 visual fallback after 4302 authority expires", async () => {
+  const initialState = createDefaultState();
+  initialState.modules.visual.controlAuthority = {
+    owner: "vj",
+    source: "vj-4302",
+    lastVjAt: Date.now() - 30_000,
+    activeUntil: Date.now() - 1_000,
+    fallbackAfterMs: 15_000
+  };
+  initialState.modules.visual.scene = "Topology";
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "visual",
+        target: "visual-main",
+        command: "setScene",
+        value: "Pulse",
+        issuedBy: "dashboard-main"
+      })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.equal(body.state.modules.visual.scene, "Pulse");
+    assert.equal(body.state.modules.visual.controlAuthority.owner, "show-control");
+  }, { initialState, loadSnapshot: false });
 });
 
 test("migrates legacy side screen topology ids", async () => {
@@ -1105,8 +1357,12 @@ test("websocket filters sync traffic by client role and avoids control snapshots
         clientId: "screen-gateway-A1",
         module: "dashboard",
         role: "screen-gateway",
+        screenId: "A1",
         capabilities: ["state.read", "screen.route"]
       }));
+      const screenPresence = await waitForMessage(dashboard, (message) =>
+        message.type === "client.presence" && message.client?.id === "screen-gateway-A1", 2000);
+      assert.equal(screenPresence.client.screenId, "A1");
       await waitForMessage(screenGateway, (message) => message.type === "state.snapshot", 2000);
 
       const ackPromise = waitForMessage(dashboard, (message) => message.type === "control.ack", 2000);

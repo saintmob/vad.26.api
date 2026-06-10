@@ -11,6 +11,7 @@ import { loadSnapshotSync, SnapshotWriter } from "./persistence.js";
 import { RealtimeHub } from "./realtime.js";
 import {
   createDefaultState,
+  emptyAudioSummary,
   isModuleName,
   normalizeAudioFrame,
   normalizeControlCommand,
@@ -181,11 +182,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     const source = state.audioSources[activeSourceId];
 
     if (!source) {
-      res.json({
-        volume: 0, subBass: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, treble: 0,
-        energy: 0, beat: 0, spectralCentroid: 0, spectralFlux: 0, transient: 0,
-        dynamicRange: 0, syncedSignal: 0
-      });
+      res.json(emptyAudioSummary());
       return;
     }
 
@@ -251,17 +248,20 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     });
     sseOrigins.set(res, origin);
     hub.addSse(res);
-    res.write("event: state.snapshot\n");
-    res.write(`data: ${JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) })}\n\n`);
+    hub.sendSse(res, "state.snapshot", JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) }));
   });
 
-  app.post("/api/mixer/frame", requireToken(options), (req, res) => {
-    const origin = resolveRequestOrigin(req.headers, req.secure);
-    const frame = normalizeAudioFrame(req.body);
-    store.applyAudioFrame(frame);
-    snapshotWriter?.schedule(store.getState());
-    broadcastSyncMessage(hub, socketProfiles, frame);
-    res.status(202).json({ ok: true, frame, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
+  app.post("/api/mixer/frame", requireToken(options), (req, res, next) => {
+    try {
+      const origin = resolveRequestOrigin(req.headers, req.secure);
+      const frame = normalizeAudioFrame(req.body);
+      store.applyAudioFrame(frame);
+      snapshotWriter?.schedule(store.getState());
+      broadcastSyncMessage(hub, socketProfiles, frame);
+      res.status(202).json({ ok: true, frame, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.post("/api/modules/:module/state", requireToken(options), (req, res) => {
@@ -277,8 +277,9 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     }
     const patch = isRecord(req.body.patch) ? req.body.patch : req.body;
     const sanitizedPatch = moduleName === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
-    if (!store.canApplyModulePatch(moduleName, String(req.body.source || "rest"))) {
-      res.status(423).json({ ok: false, error: "Operation lock active", state: store.getState() });
+    const blockReason = store.getModulePatchBlockReason(moduleName, String(req.body.source || "rest"));
+    if (blockReason) {
+      res.status(blockReason === "VJ control active" ? 409 : 423).json({ ok: false, error: blockReason, state: store.getState() });
       return;
     }
     store.applyModulePatch(moduleName, patch, String(req.body.source || "rest"));
@@ -290,8 +291,9 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
   app.post("/api/control", requireToken(options), (req, res) => {
     const origin = resolveRequestOrigin(req.headers, req.secure);
     const command = normalizeControlCommand(req.body);
-    if (!store.canApplyControlCommand(command)) {
-      res.status(423).json({ ok: false, error: "Operation lock active", state: store.getState() });
+    const blockReason = store.getControlCommandBlockReason(command);
+    if (blockReason) {
+      res.status(blockReason === "VJ control active" ? 409 : 423).json({ ok: false, error: blockReason, state: store.getState() });
       return;
     }
     store.applyControlCommand(command);
@@ -330,7 +332,8 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
   }
 
   app.use((error: Error, _req: Request, res: Response, _next: express.NextFunction) => {
-    res.status(400).json({ ok: false, error: error.message });
+    const status = (error as { status?: number }).status;
+    res.status(status && status >= 400 && status < 600 ? status : 500).json({ ok: false, error: error.message });
   });
 
   return { app, server, store, hub, snapshotWriter };
@@ -443,8 +446,9 @@ function attachWebSocket(
 
       if (message.type === "module.statePatch") {
         if (!isModuleName(message.module)) throw new Error("module.statePatch.module must be audio, visual, or interaction");
-        if (!store.canApplyModulePatch(message.module, String(message.source || clientId || "ws"))) {
-          hub.send(socket, { type: "error", error: "Operation lock active", module: message.module });
+        const blockReason = store.getModulePatchBlockReason(message.module, String(message.source || clientId || "ws"));
+        if (blockReason) {
+          hub.send(socket, { type: "error", error: blockReason, module: message.module });
           return;
         }
         const patch = isRecord(message.patch) ? message.patch : isRecord(message.state) ? message.state : {};
@@ -464,8 +468,9 @@ function attachWebSocket(
 
       if (message.type === "control.command") {
         const command = normalizeControlCommand(message);
-        if (!store.canApplyControlCommand(command)) {
-          hub.send(socket, { type: "error", error: "Operation lock active", command });
+        const blockReason = store.getControlCommandBlockReason(command);
+        if (blockReason) {
+          hub.send(socket, { type: "error", error: blockReason, command });
           return;
         }
         store.applyControlCommand(command);
@@ -641,8 +646,7 @@ function broadcastSyncMessage(
   });
   hub.forEachSseClient((client) => {
     const payload = JSON.stringify(message);
-    client.write(`event: ${message.type}\n`);
-    client.write(`data: ${payload}\n\n`);
+    hub.sendSse(client, message.type, payload);
   });
 }
 
@@ -706,8 +710,7 @@ function broadcastSnapshot(
   });
   hub.forEachSseClient((client) => {
     const clientOrigin = sseOrigins.get(client) || origin;
-    client.write("event: state.snapshot\n");
-    client.write(`data: ${JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), clientOrigin) })}\n\n`);
+    hub.sendSse(client, "state.snapshot", JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), clientOrigin) }));
   });
 }
 
