@@ -38,67 +38,93 @@
   --spacing: 0.25rem;
 }
 
-/* ── Dark Theme (default, Cloudflare Kumo surface stack) ── */
+/* ── Dark Theme (default, warm orange control stack) ── */
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: oklch(8.5% 0 0);
-  --foreground: oklch(94% 0 0);
-  --elevated: oklch(15% 0 0);
-  --card: oklch(12% 0 0);
-  --card-foreground: oklch(94% 0 0);
-  --tint: oklch(18% 0 0);
-  --control: oklch(18% 0 0);
-  --popover: oklch(14% 0 0);
-  --popover-foreground: oklch(94% 0 0);
-  --primary: #f6821f;
-  --primary-foreground: oklch(8% 0 0);
-  --secondary: oklch(18% 0 0);
-  --secondary-foreground: oklch(92% 0 0);
-  --muted: oklch(16% 0 0);
-  --muted-foreground: oklch(62% 0 0);
-  --accent: oklch(22% 0 0);
-  --accent-foreground: oklch(94% 0 0);
+  --background: #0d0c0b;
+  --foreground: #f5efe7;
+  --elevated: #171310;
+  --card: #12100e;
+  --card-foreground: #f5efe7;
+  --tint: #211812;
+  --control: #1d1712;
+  --popover: #171310;
+  --popover-foreground: #f5efe7;
+  --primary: #ff8a2a;
+  --primary-foreground: #1a0b02;
+  --secondary: #1d1712;
+  --secondary-foreground: #f0e7dc;
+  --muted: #191512;
+  --muted-foreground: #aa9d91;
+  --accent: #2a1d13;
+  --accent-foreground: #fff3e6;
   --destructive: #f87171;
-  --destructive-foreground: oklch(8% 0 0);
-  --border: oklch(28% 0 0);
-  --input: oklch(22% 0 0);
-  --ring: #f6821f;
+  --destructive-foreground: #1a0b02;
+  --border: #3a2b22;
+  --input: #241b15;
+  --ring: #ff9d43;
 
-  --color-brand: #f6821f;
-  --color-stage: #20c7ff;
-  --color-vj: #b457ff;
-  --color-dj: #3ddb6e;
+  --button-primary: #ff8a2a;
+  --button-primary-hover: #ffa04c;
+  --button-primary-active: #df690d;
+  --button-primary-text: #1a0b02;
+  --button-primary-text-hover: #160801;
+  --button-outline: #171310;
+  --button-outline-hover: #2b1e15;
+  --button-outline-active: #3a2719;
+  --button-outline-text: #dfd3c8;
+  --button-outline-text-hover: #fff1e3;
+  --button-stage-text: #1a0b02;
+  --button-muted-text: #8f8379;
+
+  --color-brand: #ff8a2a;
+  --color-stage: #ff8a2a;
+  --color-vj: #ff8a2a;
+  --color-dj: #ffb020;
   --color-route: #ff9a3d;
-  --color-online: #3ddb6e;
+  --color-online: #30d158;
   --color-cue: #ffd24a;
-  --color-offline: oklch(32% 0 0);
+  --color-offline: #5b5149;
 }
 
 /* ── Light Theme ── */
 :root[data-theme="light"] {
   color-scheme: light;
-  --background: #f8f9fa;
-  --foreground: oklch(15% 0 0);
+  --background: #f7f8f8;
+  --foreground: #17130f;
   --elevated: #ffffff;
   --card: #ffffff;
-  --card-foreground: oklch(15% 0 0);
-  --tint: oklch(96% 0 0);
-  --control: #f3f4f6;
+  --card-foreground: #17130f;
+  --tint: #fff3e8;
+  --control: #f3f1ee;
   --popover: #ffffff;
-  --popover-foreground: oklch(15% 0 0);
+  --popover-foreground: #17130f;
   --primary: #ea580c;
   --primary-foreground: #ffffff;
-  --secondary: oklch(96% 0 0);
-  --secondary-foreground: oklch(15% 0 0);
-  --muted: #f3f4f6;
-  --muted-foreground: oklch(52% 0 0);
-  --accent: oklch(95% 0 0);
-  --accent-foreground: oklch(15% 0 0);
+  --secondary: #f3f1ee;
+  --secondary-foreground: #211712;
+  --muted: #f0efed;
+  --muted-foreground: #6d625a;
+  --accent: #fff0e3;
+  --accent-foreground: #211712;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --border: #e5e7eb;
-  --input: #f3f4f6;
+  --border: #ded7d1;
+  --input: #f2efec;
   --ring: #ea580c;
+
+  --button-primary: #ea580c;
+  --button-primary-hover: #c94a08;
+  --button-primary-active: #9a3412;
+  --button-primary-text: #ffffff;
+  --button-primary-text-hover: #ffffff;
+  --button-outline: #ffffff;
+  --button-outline-hover: #fff0e3;
+  --button-outline-active: #fed7aa;
+  --button-outline-text: #3a2a21;
+  --button-outline-text-hover: #7c2d12;
+  --button-stage-text: #ffffff;
+  --button-muted-text: #746960;
 
   --color-brand: #ea580c;
   --color-stage: #ea580c;
@@ -130,6 +156,49 @@ body {
 button, input, select { font: inherit; }
 input::placeholder { color: var(--muted-foreground); }
 h1, h2, h3, p { margin: 0; }
+
+.btn-primary {
+  background-color: var(--button-primary);
+  color: var(--button-primary-text);
+}
+.btn-primary:hover {
+  background-color: var(--button-primary-hover);
+  color: var(--button-primary-text-hover);
+}
+.btn-primary:active {
+  background-color: var(--button-primary-active);
+  color: var(--button-primary-text-hover);
+}
+.btn-outline {
+  border-color: var(--input);
+  background-color: var(--button-outline);
+  color: var(--button-outline-text);
+}
+.btn-outline:hover {
+  background-color: var(--button-outline-hover);
+  color: var(--button-outline-text-hover);
+}
+.btn-outline:active {
+  background-color: var(--button-outline-active);
+  color: var(--button-outline-text-hover);
+}
+.btn-stage {
+  background-color: var(--color-stage);
+  color: var(--button-stage-text);
+}
+.btn-stage:hover {
+  background-color: color-mix(in srgb, var(--color-stage) 84%, var(--foreground) 16%);
+  color: var(--button-stage-text);
+}
+.btn-stage:active {
+  background-color: color-mix(in srgb, var(--color-stage) 72%, #000 28%);
+  color: var(--button-stage-text);
+}
+.btn-primary:disabled,
+.btn-outline:disabled,
+.btn-stage:disabled {
+  color: var(--button-muted-text);
+}
 
 /* ── Reduced Motion ── */
 @media (prefers-reduced-motion: reduce) {
@@ -470,24 +539,28 @@ kbd {
   padding: 0 11px;
   border: 1px solid var(--border);
   border-radius: 9999px;
-  background-color: var(--control);
-  color: var(--muted-foreground);
+  background-color: var(--button-outline);
+  color: var(--button-outline-text);
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 .scene-tag:hover {
-  border-color: color-mix(in srgb, var(--border) 30%, var(--foreground) 70%);
-  color: var(--foreground);
-  background-color: var(--tint);
+  border-color: color-mix(in srgb, var(--color-brand) 42%, var(--border) 58%);
+  color: var(--button-outline-text-hover);
+  background-color: var(--button-outline-hover);
+}
+.scene-tag:active {
+  background-color: var(--button-outline-active);
 }
 .scene-tag.active {
-  border-color: var(--color-vj);
-  background-color: color-mix(in srgb, var(--color-vj) 12%, var(--card) 88%);
-  color: var(--color-vj);
+  border-color: color-mix(in srgb, var(--color-brand) 72%, var(--border) 28%);
+  background-color: color-mix(in srgb, var(--color-brand) 18%, var(--card) 82%);
+  color: var(--color-brand);
   font-weight: 600;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 12%, transparent);
 }
 
 .stage-route-bar {
@@ -815,9 +888,62 @@ kbd {
   gap: 8px;
   margin: 0 4px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--color-vj) 20%, var(--border) 80%);
+  border: 1px solid color-mix(in srgb, var(--color-brand) 24%, var(--border) 76%);
   border-radius: calc(var(--radius) - 4px);
-  background-color: color-mix(in srgb, var(--card) 70%, var(--background) 30%);
+  background-color: color-mix(in srgb, var(--card) 78%, var(--color-brand) 4%);
+}
+
+.engine-panel {
+  gap: 8px;
+}
+
+.engine-label {
+  min-height: 26px;
+}
+
+.engine-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  background-color: var(--button-outline);
+  color: var(--button-outline-text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  transition: border-color 0.15s, background-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.engine-tab:hover {
+  border-color: color-mix(in srgb, var(--color-brand) 46%, var(--border) 54%);
+  background-color: var(--button-outline-hover);
+  color: var(--button-outline-text-hover);
+}
+
+.engine-tab.active {
+  border-color: var(--color-brand);
+  background-color: color-mix(in srgb, var(--color-brand) 18%, var(--card) 82%);
+  color: var(--color-brand);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 12%, transparent);
+}
+
+.engine-content {
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-brand) 12%, var(--border) 88%);
+  border-radius: calc(var(--radius) - 3px);
+  background-color: color-mix(in srgb, var(--card) 88%, var(--background) 12%);
 }
 
 .scene-grid {
