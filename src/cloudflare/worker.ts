@@ -133,7 +133,8 @@ export class ShowRoomDurableObject {
       }
       return json({ ok: false, error: "Not found" }, 404);
     } catch (error) {
-      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400);
+      const status = error instanceof Error && "status" in error ? Number((error as { status?: unknown }).status) : 0;
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, status >= 400 && status < 600 ? status : 500);
     }
   }
 
@@ -455,7 +456,7 @@ export class ShowRoomDurableObject {
   private applyModulePatch(moduleName: ModuleName, patch: JsonRecord, source: string) {
     const state = this.requireState();
     const sanitizedPatch = moduleName === "interaction" ? sanitizeWorkerInteractionModulePatch(patch) : patch;
-    mergePatch(state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
+    (state.modules as unknown as JsonRecord)[moduleName] = mergePatch(state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
     if (moduleName === "visual" && isVjVisualSource(source)) markVisualAuthorityFromVj(state, source);
     if (moduleName === "audio" && typeof sanitizedPatch.bpm === "number") state.show.bpm = positiveNumber(sanitizedPatch.bpm, state.show.bpm);
     if (moduleName === "audio") {
@@ -803,25 +804,34 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
     }
   }
   if (command.module === "audio") {
+    const source = state.audioSources[command.target];
+    if (source && command.command === "setMute") {
+      source.muted = Boolean(value);
+      source.gain = source.muted ? 0 : Math.max(source.gain, 0.5);
+    }
+    if (source && command.command === "setGain") {
+      source.gain = clampUnit(value, source.gain);
+      source.muted = source.gain === 0;
+    }
     if (command.command === "setPreset") state.modules.audio.activePreset = String(value || command.target);
     if (command.command === "setStyle") state.modules.audio.activeStyleId = String(value || command.target);
     if (command.command === "shuffleStyle") state.modules.audio.activePreset = `${state.modules.audio.activePreset || "Style"} Shuffle`;
     if (command.command === "setActiveTab") state.modules.audio.activeTab = String(value || command.target);
-    if (command.command === "setMasterLevel") state.modules.audio.masterLevel = clampUnit(value);
+    if (command.command === "setMasterLevel") state.modules.audio.masterLevel = clampUnit(value, state.modules.audio.masterLevel);
   }
   if (command.module === "visual" || command.module === "video") {
     if (["setScene", "focusVideo"].includes(command.command)) state.modules.visual.scene = String(value || command.target);
     if (command.command === "setPreset") state.modules.visual.preset = String(value || command.target);
     if (command.command === "setText") {
-      if (isRecord(value)) mergePatch(state.modules.visual.text as unknown as JsonRecord, value);
+      if (isRecord(value)) state.modules.visual.text = mergePatch(state.modules.visual.text as unknown as JsonRecord, value) as typeof state.modules.visual.text;
       else state.modules.visual.text.value = String(value || "");
     }
     if (command.command === "setAudioDrive" && ["mic", "music", "api", "hybrid"].includes(String(value))) {
       state.modules.visual.audioDriveMode = (String(value) === "hybrid" ? "api" : String(value)) as "mic" | "music" | "api";
     }
     if (command.command === "setFullscreen") state.modules.visual.fullscreen = Boolean(value);
-    if (command.command === "setColors" && isRecord(value)) mergePatch(state.modules.visual.colors as unknown as JsonRecord, value);
-    if (command.command === "setFx" && isRecord(value)) mergePatch(state.modules.visual.fx as unknown as JsonRecord, value);
+    if (command.command === "setColors" && isRecord(value)) state.modules.visual.colors = mergePatch(state.modules.visual.colors as unknown as JsonRecord, value) as typeof state.modules.visual.colors;
+    if (command.command === "setFx" && isRecord(value)) state.modules.visual.fx = mergePatch(state.modules.visual.fx as unknown as JsonRecord, value) as typeof state.modules.visual.fx;
   }
   if (command.module === "interaction") {
     if (command.command === "setOperationLock") {
@@ -838,7 +848,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       state.modules.interaction.mode = String(value || command.target) as PerformanceState["modules"]["interaction"]["mode"];
       state.modules.interaction.visualMode = "tree";
     }
-    if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value);
+    if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value, state.modules.interaction.intensity);
     if (command.command === "resetTree") {
       state.modules.interaction.treeGrowth = 0;
       state.modules.interaction.treePhase = "idle";
@@ -860,8 +870,8 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as PerformanceState["modules"]["interaction"]["visualMode"];
     }
-    if (command.command === "setFireworkState" && ["standby", "launching", "resetting"].includes(String(value))) {
-      state.modules.interaction.fireworkState = String(value) as PerformanceState["modules"]["interaction"]["fireworkState"];
+    if (command.command === "setFireworkState") {
+      state.modules.interaction.fireworkState = ["standby", "launching", "resetting"].includes(String(value)) ? String(value) as PerformanceState["modules"]["interaction"]["fireworkState"] : "standby";
       state.modules.interaction.visualMode = "firework";
     }
     if (command.command === "setBaofaFishState") {
@@ -925,15 +935,35 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
 function buildControlPatchMessages(command: ControlCommand, state: PerformanceState): SyncMessage[] {
   const updatedAt = state.updatedAt;
   if (command.module === "show") {
+    const audioPatch: JsonRecord = {};
+    if (["play", "pause", "stop", "reset"].includes(command.command)) audioPatch.transport = state.modules.audio.transport;
+    if (command.command === "setBpm") audioPatch.bpm = state.modules.audio.bpm;
     return [
       { type: "show.patch", patch: state.show, updatedAt },
-      { type: "state.patch", module: "audio", patch: { transport: state.modules.audio.transport, bpm: state.modules.audio.bpm }, updatedAt }
+      ...(Object.keys(audioPatch).length ? [{ type: "state.patch" as const, module: "audio" as const, patch: audioPatch, updatedAt }] : [])
     ];
   }
-  if (command.module === "audio") return [{ type: "state.patch", module: "audio", patch: state.modules.audio as unknown as JsonRecord, updatedAt }];
-  if (command.module === "visual" || command.module === "video") return [{ type: "state.patch", module: "visual", patch: state.modules.visual as unknown as JsonRecord, updatedAt }];
+  if (command.module === "audio") return [{ type: "state.patch", module: "audio", patch: pickAudioPatch(command, state), updatedAt }];
+  if (command.module === "visual" || command.module === "video") return [{ type: "state.patch", module: "visual", patch: pickVisualPatch(command, state), updatedAt }];
   if (command.module === "interaction") {
-    const messages: SyncMessage[] = [{ type: "state.patch", module: "interaction", patch: state.modules.interaction as unknown as JsonRecord, updatedAt }];
+    const interaction = state.modules.interaction;
+    let patch: JsonRecord;
+    if (["setInteractionMode", "setMode"].includes(command.command)) patch = { mode: interaction.mode, visualMode: interaction.visualMode };
+    else if (command.command === "setIntensity") patch = { intensity: interaction.intensity };
+    else if (command.command === "resetTree") {
+      patch = { mode: interaction.mode, intensity: interaction.intensity, evolution: interaction.evolution, treeGrowth: interaction.treeGrowth, treePhase: interaction.treePhase, gestureActive: interaction.gestureActive, visualMode: interaction.visualMode, fireworkState: interaction.fireworkState, baofaFishState: interaction.baofaFishState, lastInteraction: interaction.lastInteraction, screenPulse: interaction.screenPulse };
+    } else if (command.command === "setVisualMode") patch = { visualMode: interaction.visualMode, mode: interaction.mode, baofaFishState: interaction.baofaFishState };
+    else if (command.command === "setFireworkState") patch = { fireworkState: interaction.fireworkState, visualMode: interaction.visualMode };
+    else if (command.command === "setBaofaFishState") patch = { baofaFishState: interaction.baofaFishState };
+    else if (command.command === "pulseScreen") patch = { screenPulse: interaction.screenPulse };
+    else if (command.command === "setScreen") patch = { screenId: interaction.screenId, role: interaction.role };
+    else if (["setScreenOwner", "setScreenRoutePreset"].includes(command.command)) patch = { screenRoutePreset: interaction.screenRoutePreset, screenRoutes: interaction.screenRoutes };
+    else if (["setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation"].includes(command.command)) patch = { screenPresentation: interaction.screenPresentation };
+    else if (command.command === "saveScreenRouteArrangement") patch = { screenRoutePreset: interaction.screenRoutePreset, screenRoutes: interaction.screenRoutes, customScreenRoutePresets: interaction.customScreenRoutePresets };
+    else if (command.command === "deleteScreenRouteArrangement") patch = { screenRoutePreset: interaction.screenRoutePreset, screenRoutes: interaction.screenRoutes, customScreenRoutePresets: interaction.customScreenRoutePresets };
+    else if (command.command === "setOperationLock") patch = {};
+    else patch = interaction as unknown as JsonRecord;
+    const messages: SyncMessage[] = [{ type: "state.patch", module: "interaction", patch, updatedAt }];
     if (command.command === "resetTree") {
       messages.push({ type: "show.patch", patch: state.show, updatedAt });
       messages.push({ type: "state.patch", module: "audio", patch: { transport: state.modules.audio.transport }, updatedAt });
@@ -941,6 +971,29 @@ function buildControlPatchMessages(command: ControlCommand, state: PerformanceSt
     return messages;
   }
   return [];
+}
+
+function pickAudioPatch(command: ControlCommand, state: PerformanceState): JsonRecord {
+  if (["setMute", "setGain"].includes(command.command)) {
+    return { activeSourceId: state.modules.audio.activeSourceId, masterLevel: state.modules.audio.masterLevel, audioSources: { [command.target]: state.audioSources[command.target] } };
+  }
+  if (command.command === "setMasterLevel") return { masterLevel: state.modules.audio.masterLevel };
+  if (command.command === "setPreset") return { activePreset: state.modules.audio.activePreset };
+  if (command.command === "setStyle") return { activeStyleId: state.modules.audio.activeStyleId };
+  if (command.command === "shuffleStyle") return { activePreset: state.modules.audio.activePreset, activeStyleId: state.modules.audio.activeStyleId };
+  if (command.command === "setActiveTab") return { activeTab: state.modules.audio.activeTab };
+  return state.modules.audio as unknown as JsonRecord;
+}
+
+function pickVisualPatch(command: ControlCommand, state: PerformanceState): JsonRecord {
+  if (["setScene", "focusVideo"].includes(command.command)) return { scene: state.modules.visual.scene, preset: state.modules.visual.preset };
+  if (command.command === "setPreset") return { preset: state.modules.visual.preset };
+  if (command.command === "setText") return { text: state.modules.visual.text };
+  if (command.command === "setAudioDrive") return { audioDriveMode: state.modules.visual.audioDriveMode };
+  if (command.command === "setFullscreen") return { fullscreen: state.modules.visual.fullscreen };
+  if (command.command === "setColors") return { colors: state.modules.visual.colors };
+  if (command.command === "setFx") return { fx: state.modules.visual.fx };
+  return state.modules.visual as unknown as JsonRecord;
 }
 
 function shouldDeliverToSocket(profile: ConnectionState | undefined, message: SyncMessage) {
@@ -1051,8 +1104,11 @@ function normalizeControlCommand(input: unknown): ControlCommand {
 
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setStyle", "shuffleStyle", "setActiveTab"].includes(command)) return "audio";
-  if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx", "focusVideo"].includes(command)) return "visual";
+  if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx"].includes(command)) return "visual";
   if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "saveScreenRouteArrangement", "deleteScreenRouteArrangement", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation", "setOperationLock"].includes(command)) return "interaction";
+  if (["play", "pause", "stop", "reset", "setBpm", "seek"].includes(command)) return "show";
+  if (command === "focusVideo") return "video";
+  if (command === "setGuestOnStage") return "guest";
   return "show";
 }
 
@@ -1072,7 +1128,7 @@ function normalizeAudioFrame(input: unknown): AudioFrame {
     gain: clampUnit(input.gain, 0.72),
     muted: Boolean(input.muted),
     speaking: typeof input.speaking === "boolean" ? input.speaking : level > 0.22,
-    frequencyBands: Array.isArray(input.frequencyBands) ? input.frequencyBands.slice(0, 32).map((value) => clampUnit(value)) : [],
+    frequencyBands: Array.isArray(input.frequencyBands) ? input.frequencyBands.slice(0, 32).map((value) => clampUnit(value)) : Array.from({ length: 16 }, () => 0),
     slotIds: normalizeStringList(input.slotIds),
     slotNames: normalizeStringList(input.slotNames),
     slotCategories: normalizeStringList(input.slotCategories),
@@ -1209,12 +1265,13 @@ function isBuiltInScreenRoutePreset(value: ScreenRoutePreset): value is (typeof 
   return BUILT_IN_SCREEN_ROUTE_PRESETS.includes(value as (typeof BUILT_IN_SCREEN_ROUTE_PRESETS)[number]);
 }
 
-function mergePatch(target: JsonRecord, patch: JsonRecord) {
+function mergePatch(target: JsonRecord, patch: JsonRecord): JsonRecord {
+  const next = { ...target };
   for (const [key, value] of Object.entries(patch)) {
-    if (isRecord(value) && isRecord(target[key])) mergePatch(target[key] as JsonRecord, value);
-    else target[key] = value;
+    if (isRecord(value) && isRecord(next[key])) next[key] = mergePatch(next[key] as JsonRecord, value);
+    else next[key] = value;
   }
-  return target;
+  return next;
 }
 
 function isModuleName(value: unknown): value is ModuleName {
@@ -1226,11 +1283,15 @@ function isRecord(value: unknown): value is JsonRecord {
 }
 
 function positiveNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, number);
 }
 
 function clampUnit(value: unknown, fallback = 0) {
-  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, Math.min(1, number));
 }
 
 function emptyAudioSummary() {

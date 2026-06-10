@@ -14,7 +14,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": ["./src/client/*"]
+    },
+    "baseUrl": "."
   },
   "include": ["src/client", "src/types.ts", "vite.config.ts"]
 }

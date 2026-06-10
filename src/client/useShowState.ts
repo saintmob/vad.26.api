@@ -1,4 +1,5 @@
-import React from "react";
+import { useEffect } from "react";
+import { isPublicRuntime } from "./lib/helpers";
 import type { ControlCommand, ModuleName, PerformanceState } from "../types";
 
 export type ConnectionState = "connecting" | "connected" | "offline";
@@ -75,8 +76,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 const env = (import.meta as unknown as { env: Record<string, string | undefined> }).env || {};
 const configuredShowBackendUrl = String(env.VITE_SHOW_BACKEND_URL || "").trim().replace(/\/$/, "");
 const configuredShowWsUrl = String(env.VITE_SHOW_WS_URL || "").trim().replace(/\/$/, "");
-const hostedShowBackendUrl = "https://vad-26-show-control.saintmob.workers.dev";
-const hostedShowWsUrl = "wss://vad-26-show-control.saintmob.workers.dev/ws";
+const hostedShowBackendUrl = String(env.VITE_HOSTED_BACKEND_URL || "").trim() || "https://vad-26-show-control.saintmob.workers.dev";
+const hostedShowWsUrl = String(env.VITE_HOSTED_WS_URL || "").trim() || "wss://vad-26-show-control.saintmob.workers.dev/ws";
 
 export async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -102,20 +103,6 @@ export function webSocketUrl(path: string) {
   return withRoom(`${protocol}://${window.location.host}${path}`);
 }
 
-function isPublicRuntime() {
-  if (typeof window === "undefined") return false;
-  const host = window.location.hostname.toLowerCase();
-  return !(
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "0.0.0.0" ||
-    host.endsWith(".local") ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-  );
-}
-
 export function currentRoom() {
   if (typeof window === "undefined") return "";
   return new URLSearchParams(window.location.search).get("room") || new URLSearchParams(window.location.search).get("showId") || "";
@@ -136,7 +123,7 @@ export function useWebSocket(
   onMessage: (message: ServerMessage) => void,
   onConnectionChange: (status: ConnectionState) => void
 ) {
-  React.useEffect(() => {
+  useEffect(() => {
     let closed = false;
     let socket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -162,7 +149,13 @@ export function useWebSocket(
         }, 25_000);
       });
       socket.addEventListener("message", (event) => {
-        onMessage(JSON.parse(event.data) as ServerMessage);
+        let message: ServerMessage;
+        try {
+          message = JSON.parse(event.data) as ServerMessage;
+        } catch {
+          return;
+        }
+        onMessage(message);
       });
       socket.addEventListener("close", () => {
         if (closed) return;

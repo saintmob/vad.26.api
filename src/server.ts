@@ -11,6 +11,7 @@ import { loadSnapshotSync, SnapshotWriter } from "./persistence.js";
 import { RealtimeHub } from "./realtime.js";
 import {
   createDefaultState,
+  emptyAudioSummary,
   isModuleName,
   normalizeAudioFrame,
   normalizeControlCommand,
@@ -181,11 +182,7 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     const source = state.audioSources[activeSourceId];
 
     if (!source) {
-      res.json({
-        volume: 0, subBass: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, treble: 0,
-        energy: 0, beat: 0, spectralCentroid: 0, spectralFlux: 0, transient: 0,
-        dynamicRange: 0, syncedSignal: 0
-      });
+      res.json(emptyAudioSummary());
       return;
     }
 
@@ -254,13 +251,17 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
     hub.sendSse(res, "state.snapshot", JSON.stringify({ type: "state.snapshot", state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) }));
   });
 
-  app.post("/api/mixer/frame", requireToken(options), (req, res) => {
-    const origin = resolveRequestOrigin(req.headers, req.secure);
-    const frame = normalizeAudioFrame(req.body);
-    store.applyAudioFrame(frame);
-    snapshotWriter?.schedule(store.getState());
-    broadcastSyncMessage(hub, socketProfiles, frame);
-    res.status(202).json({ ok: true, frame, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
+  app.post("/api/mixer/frame", requireToken(options), (req, res, next) => {
+    try {
+      const origin = resolveRequestOrigin(req.headers, req.secure);
+      const frame = normalizeAudioFrame(req.body);
+      store.applyAudioFrame(frame);
+      snapshotWriter?.schedule(store.getState());
+      broadcastSyncMessage(hub, socketProfiles, frame);
+      res.status(202).json({ ok: true, frame, state: resolveStateForRequest(store.getState(), origin, resolveRequestRoom(req.query)) });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   app.post("/api/modules/:module/state", requireToken(options), (req, res) => {
@@ -331,7 +332,8 @@ export function createAppServer(options: CreateServerOptions = {}): AppServer {
   }
 
   app.use((error: Error, _req: Request, res: Response, _next: express.NextFunction) => {
-    res.status(400).json({ ok: false, error: error.message });
+    const status = (error as { status?: number }).status;
+    res.status(status && status >= 400 && status < 600 ? status : 500).json({ ok: false, error: error.message });
   });
 
   return { app, server, store, hub, snapshotWriter };

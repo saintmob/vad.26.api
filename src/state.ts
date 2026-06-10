@@ -10,6 +10,7 @@ import {
   MODULE_NAMES,
   ModuleName,
   PerformanceState,
+  ScreenRegistryEntry,
   ScreenRouteArrangementPreset,
   ScreenOwner,
   ScreenRouteEntry,
@@ -42,8 +43,8 @@ const SCREEN_TOPOLOGY = [
 const VJ_SCREEN_IDS = new Set(["A1"]);
 const VJ_TAKEOVER_SCREEN_IDS: Set<string> = new Set(SCREEN_IDS);
 const BUILT_IN_SCREEN_ROUTE_PRESETS: BuiltInScreenRoutePreset[] = ["balanced", "vj_takeover", "baofa_takeover"];
-const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
-const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
+const HOSTED_VJ_SCREEN_ORIGIN = process.env.VJ_SCREEN_ORIGIN || "https://doit-pearl.vercel.app";
+const HOSTED_BAOFA_SCREEN_ORIGIN = process.env.BAOFA_SCREEN_ORIGIN || "https://baofa.vercel.app";
 const VISUAL_SCENE_PRESETS: Record<string, string> = {
   "Video Flow": "Video Flow",
   "Layered Stage": "Layered Stage",
@@ -385,7 +386,7 @@ export class ShowStateStore {
 
   applyModulePatch(moduleName: ModuleName, patch: JsonRecord, source = "module"): PerformanceState {
     const sanitizedPatch = moduleName === "interaction" ? sanitizeInteractionModulePatch(patch) : patch;
-    mergePatch(this.state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
+    (this.state.modules as unknown as JsonRecord)[moduleName] = mergePatch(this.state.modules[moduleName] as unknown as JsonRecord, sanitizedPatch);
     if (moduleName === "visual" && isVjVisualSource(source)) {
       markVisualAuthorityFromVj(this.state, source);
     }
@@ -598,15 +599,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
     }
     if (command.command === "setPreset") state.modules.visual.preset = String(value || command.target);
     if (command.command === "setText") {
-      if (isRecord(value)) mergePatch(state.modules.visual.text as unknown as JsonRecord, value);
+      if (isRecord(value)) state.modules.visual.text = mergePatch(state.modules.visual.text as unknown as JsonRecord, value) as VisualModuleState["text"];
       else state.modules.visual.text.value = String(value || "");
     }
     if (command.command === "setAudioDrive" && ["mic", "music", "api", "hybrid"].includes(String(value))) {
       state.modules.visual.audioDriveMode = (String(value) === "hybrid" ? "api" : String(value)) as "mic" | "music" | "api";
     }
     if (command.command === "setFullscreen") state.modules.visual.fullscreen = Boolean(value);
-    if (command.command === "setColors" && isRecord(value)) mergePatch(state.modules.visual.colors as unknown as JsonRecord, value);
-    if (command.command === "setFx" && isRecord(value)) mergePatch(state.modules.visual.fx as unknown as JsonRecord, value);
+    if (command.command === "setColors" && isRecord(value)) state.modules.visual.colors = mergePatch(state.modules.visual.colors as unknown as JsonRecord, value) as VisualModuleState["colors"];
+    if (command.command === "setFx" && isRecord(value)) state.modules.visual.fx = mergePatch(state.modules.visual.fx as unknown as JsonRecord, value) as VisualModuleState["fx"];
   }
 
   if (command.module === "interaction") {
@@ -732,7 +733,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
   }
 }
 
-function normalizeBands(value: unknown) {
+function normalizeBands(value: unknown): number[] {
   if (!Array.isArray(value)) return DEFAULT_BANDS;
   return value.slice(0, 32).map((item) => clampUnit(item));
 }
@@ -813,7 +814,7 @@ function normalizeVisualControlAuthority(value: unknown): VisualModuleState["con
   };
 }
 
-function nullableTimestamp(value: unknown) {
+function nullableTimestamp(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
@@ -885,20 +886,20 @@ function normalizeScreenPresentation(value: unknown): InteractionModuleState["sc
   };
 }
 
-function normalizeFireworkState(value: unknown) {
+function normalizeFireworkState(value: unknown): InteractionModuleState["fireworkState"] {
   return ["standby", "launching", "resetting"].includes(String(value)) ? String(value) as InteractionModuleState["fireworkState"] : "standby";
 }
 
-function normalizeBaofaFishState(value: unknown) {
-  if (String(value) === "roam") return "roam" as const;
-  return String(value) === "running" ? "running" as const : "idle" as const;
+function normalizeBaofaFishState(value: unknown): InteractionModuleState["baofaFishState"] {
+  if (String(value) === "roam") return "roam";
+  return String(value) === "running" ? "running" : "idle";
 }
 
-function normalizeTreePhase(value: unknown) {
+function normalizeTreePhase(value: unknown): InteractionModuleState["treePhase"] {
   return ["idle", "growing", "bright", "fading"].includes(String(value)) ? String(value) as InteractionModuleState["treePhase"] : "idle";
 }
 
-function isLoopbackOrigin(origin: unknown) {
+function isLoopbackOrigin(origin: unknown): boolean {
   try {
     const url = new URL(String(origin || ""));
     return ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
@@ -907,7 +908,7 @@ function isLoopbackOrigin(origin: unknown) {
   }
 }
 
-function createDefaultScreenRegistry() {
+function createDefaultScreenRegistry(): ScreenRegistryEntry[] {
   return SCREEN_IDS.map((id, index) => ({
     id,
     label: `Screen ${id}`,
@@ -1081,8 +1082,7 @@ function normalizeVisualDevice(value: unknown): VisualScreenState["device"] | nu
 
 function normalizeVisualScene(value: unknown): string | null {
   const scene = String(value || "").trim();
-  if (!scene) return null;
-  return VISUAL_SCENE_IDS.includes(scene) ? scene : scene;
+  return scene || null;
 }
 
 function normalizeScreenRoutes(value: unknown, preset: ScreenRoutePreset) {
@@ -1266,13 +1266,22 @@ function isRecord(value: unknown): value is JsonRecord {
 }
 
 function mergePatch<T extends JsonRecord>(target: T, patch: JsonRecord): T {
+  const next = { ...target };
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    if (isRecord(value) && isRecord(target[key])) {
-      mergePatch(target[key] as JsonRecord, value);
+    if (isRecord(value) && isRecord(next[key])) {
+      next[key as keyof T] = mergePatch(next[key] as JsonRecord, value) as T[keyof T];
     } else {
-      target[key as keyof T] = value as T[keyof T];
+      next[key as keyof T] = value as T[keyof T];
     }
   }
-  return target;
+  return next;
+}
+
+export function emptyAudioSummary() {
+  return {
+    volume: 0, subBass: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, treble: 0,
+    energy: 0, beat: 0, spectralCentroid: 0, spectralFlux: 0, transient: 0,
+    dynamicRange: 0, syncedSignal: 0
+  };
 }

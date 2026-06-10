@@ -10,6 +10,8 @@ coverage/
 .env.*
 !.env.example
 .vercel/
+.claude/
+.wrangler/
 
 # Runtime state and local logs
 data/
@@ -21,7 +23,7 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Browser/test artifacts
-.playwright-mcp/
+.playwright*/
 playwright-report/
 test-results/
 
@@ -33,4 +35,3 @@ Thumbs.db
 !.vscode/extensions.json
 !.vscode/settings.json
 *.swp
-.vercel
