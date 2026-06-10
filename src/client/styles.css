@@ -323,10 +323,27 @@ h1, h2, h3, p { margin: 0; }
   border-color: color-mix(in srgb, var(--border) 70%, var(--foreground) 30%);
 }
 
+.header-ack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(340px, 24vw);
+}
+.header-ack-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 /* ── Bottom Strip ── */
 .bottom-strip {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   padding: 0 14px;
@@ -336,23 +353,6 @@ h1, h2, h3, p { margin: 0; }
   overflow: hidden;
   transition: border-color 0.3s, background-color 0.3s;
   box-shadow: 0 1px 2px color-mix(in srgb, #000 3%, transparent);
-}
-.footer-ack {
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: min(560px, 58vw);
-}
-.footer-ack-text {
-  font-size: 12px;
-  color: var(--foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  font-weight: 500;
 }
 
 /* ── Port Lights (module online indicators) ── */
@@ -563,6 +563,13 @@ kbd {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 12%, transparent);
 }
 
+.vj-text-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .stage-route-bar {
   display: flex;
   align-items: center;
@@ -583,6 +590,28 @@ kbd {
 .stage-route-owners {
   display: flex;
   gap: 5px;
+}
+.stage-footer-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.stage-presentation {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: min(360px, 34vw);
+}
+.stage-sequence-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .events-list {
@@ -895,6 +924,18 @@ kbd {
 
 .engine-panel {
   gap: 8px;
+  min-width: 0;
+}
+
+.engine-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(132px, 0.65fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.fish-panel {
+  min-width: 0;
 }
 
 .engine-label {
@@ -937,6 +978,11 @@ kbd {
   background-color: color-mix(in srgb, var(--color-brand) 18%, var(--card) 82%);
   color: var(--color-brand);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-brand) 12%, transparent);
+}
+
+.engine-tab.is-static {
+  cursor: default;
+  pointer-events: none;
 }
 
 .engine-content {
@@ -998,6 +1044,10 @@ kbd {
   .workspace { gap: 4px; }
   .module-head { padding: 8px 12px; min-height: 32px; }
   .bottom-strip { grid-template-columns: 1fr; gap: 4px; padding: 4px 10px; }
+  .stage-route-bar { align-items: flex-start; flex-wrap: wrap; }
+  .stage-footer-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .stage-presentation { width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .engine-layout { grid-template-columns: 1fr; }
 }
 @media (max-width: 480px) {
   .shell { padding: 3px; gap: 2px; }

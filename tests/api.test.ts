@@ -678,6 +678,22 @@ test("updates screen presentation controls", async () => {
     assert.equal(presentationBody.state.modules.interaction.screenPresentation.cameraEnabled, true);
     assert.equal(presentationBody.state.modules.interaction.screenPresentation.showDebug, true);
     assert.equal(presentationBody.state.modules.interaction.screenPresentation.showMenu, true);
+
+    const camera = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "screen-camera",
+        command: "setScreenCameraEnabled",
+        value: false,
+        issuedBy: "test"
+      })
+    });
+    const cameraBody = await camera.json();
+
+    assert.equal(camera.status, 202);
+    assert.equal(cameraBody.state.modules.interaction.screenPresentation.cameraEnabled, false);
   });
 });
 
@@ -1114,12 +1130,15 @@ test("applies baofa visual mode controls", async () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         module: "interaction",
-        target: "visual-mode",
-        command: "setVisualMode",
-        value: "firework"
+        target: "firework-state",
+        command: "setFireworkState",
+        value: "launching"
       })
     });
     assert.equal(fireworkModeResponse.status, 202);
+    const fireworkModeBody = await fireworkModeResponse.json();
+    assert.equal(fireworkModeBody.state.modules.interaction.fireworkState, "launching");
+    assert.equal(fireworkModeBody.state.modules.interaction.visualMode, "firework");
 
     const fishResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
@@ -1136,7 +1155,59 @@ test("applies baofa visual mode controls", async () => {
     assert.equal(fishBody.state.modules.interaction.baofaFishState, "running");
     assert.equal(fishBody.state.modules.interaction.mode, "flow");
     assert.equal(fishBody.state.modules.interaction.visualMode, "firework");
+    assert.equal(fishBody.state.modules.interaction.fireworkState, "launching");
     assert.equal(fishBody.state.modules.interaction.intensity, 0.08);
+
+    const fishRoamResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "baofa-fish",
+        command: "setBaofaFishState",
+        value: "roam"
+      })
+    });
+    const fishRoamBody = await fishRoamResponse.json();
+    assert.equal(fishRoamResponse.status, 202);
+    assert.equal(fishRoamBody.state.modules.interaction.baofaFishState, "roam");
+
+    const treeStandbyResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "tree-standby",
+        command: "setTreeStandby",
+        value: true
+      })
+    });
+    const treeStandbyBody = await treeStandbyResponse.json();
+    assert.equal(treeStandbyResponse.status, 202);
+    assert.equal(treeStandbyBody.state.modules.interaction.treeGrowth, 0);
+    assert.equal(treeStandbyBody.state.modules.interaction.treePhase, "idle");
+    assert.equal(treeStandbyBody.state.modules.interaction.mode, "idle");
+    assert.equal(treeStandbyBody.state.modules.interaction.visualMode, "tree");
+    assert.equal(treeStandbyBody.state.modules.interaction.fireworkState, "launching");
+    assert.equal(treeStandbyBody.state.modules.interaction.baofaFishState, "roam");
+    assert.equal(treeStandbyBody.state.modules.audio.transport, "stopped");
+    assert.equal(treeStandbyBody.state.show.status, "standby");
+
+    const calmResponse = await fetch(`${baseUrl}/api/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        module: "interaction",
+        target: "interaction-mode",
+        command: "setMode",
+        value: "idle"
+      })
+    });
+    const calmBody = await calmResponse.json();
+    assert.equal(calmResponse.status, 202);
+    assert.equal(calmBody.state.modules.interaction.mode, "idle");
+    assert.equal(calmBody.state.modules.interaction.treePhase, "idle");
+    assert.equal(calmBody.state.modules.interaction.treeGrowth, 0.12);
 
     const resetResponse = await fetch(`${baseUrl}/api/control`, {
       method: "POST",
@@ -1154,7 +1225,8 @@ test("applies baofa visual mode controls", async () => {
     assert.equal(resetBody.state.modules.interaction.treePhase, "idle");
     assert.equal(resetBody.state.modules.interaction.mode, "idle");
     assert.equal(resetBody.state.modules.interaction.visualMode, "tree");
-    assert.equal(resetBody.state.modules.interaction.baofaFishState, "running");
+    assert.equal(resetBody.state.modules.interaction.fireworkState, "standby");
+    assert.equal(resetBody.state.modules.interaction.baofaFishState, "idle");
     assert.equal(resetBody.state.modules.audio.transport, "stopped");
     assert.equal(resetBody.state.show.status, "standby");
     assert.equal(resetBody.state.show.positionMs, 0);

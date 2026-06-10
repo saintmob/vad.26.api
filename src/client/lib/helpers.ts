@@ -1,4 +1,4 @@
-import type { ScreenOwner } from "../../types";
+import type { InteractionModuleState, ScreenOwner } from "../../types";
 
 export function normalizeScreenOccupancyId(value: string | null | undefined): string {
   if (!value) return "";
@@ -77,13 +77,27 @@ export function isLocalRouteHostname(hostname: string): boolean {
   );
 }
 
-export function localizeScreenRouteTarget(url: string | null, owner: ScreenOwner | undefined): string | null {
+export function localizeScreenRouteTarget(
+  url: string | null,
+  owner: ScreenOwner | undefined,
+  presentation?: InteractionModuleState["screenPresentation"],
+  screenId?: string
+): string | null {
   if (!url || (owner !== "vj" && owner !== "baofa")) return url;
   if (typeof window === "undefined" || !isLocalRouteHostname(window.location.hostname)) return url;
   const target = new URL(url, window.location.origin);
   target.protocol = window.location.protocol;
   target.hostname = window.location.hostname;
   target.port = owner === "vj" ? "4302" : "4303";
+  if (screenId) target.searchParams.set("screenId", screenId);
+  if (presentation) {
+    target.searchParams.set("showMenu", presentation.showMenu ? "1" : "0");
+    target.searchParams.set("showDebug", presentation.showDebug ? "1" : "0");
+    target.searchParams.set("cameraEnabled", presentation.cameraEnabled ? "1" : "0");
+    target.searchParams.set("menu", presentation.showMenu ? "1" : "0");
+    target.searchParams.set("debug", presentation.showDebug ? "1" : "0");
+    target.searchParams.set("camera", presentation.cameraEnabled ? "1" : "0");
+  }
   return target.toString().replace(/\/$/, "");
 }
 

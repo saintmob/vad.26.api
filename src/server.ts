@@ -603,7 +603,7 @@ function pickInteractionControlPatch(command: ControlCommand, state: Performance
     return { mode: interaction.mode, visualMode: interaction.visualMode };
   }
   if (command.command === "setIntensity") return { intensity: interaction.intensity };
-  if (command.command === "resetTree") {
+  if (["resetTree", "setTreeStandby"].includes(command.command)) {
     return {
       mode: interaction.mode,
       intensity: interaction.intensity,
@@ -626,7 +626,7 @@ function pickInteractionControlPatch(command: ControlCommand, state: Performance
   if (["setScreenOwner", "setScreenRoutePreset"].includes(command.command)) {
     return { screenRoutePreset: interaction.screenRoutePreset, screenRoutes: interaction.screenRoutes };
   }
-  if (["setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenPresentation"].includes(command.command)) {
+  if (["setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation"].includes(command.command)) {
     return { screenPresentation: interaction.screenPresentation };
   }
   if (command.command === "setOperationLock") return {};

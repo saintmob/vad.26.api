@@ -14,6 +14,7 @@ interface TopStripProps {
   moduleOnline: Record<ModulePortKey, boolean>;
   syncStatus: SyncStatus;
   syncLabel: string;
+  lastAck: string;
   clientCount: number;
   onOpenSettings: () => void;
 }
@@ -38,9 +39,13 @@ export function TopStrip({
   moduleOnline,
   syncStatus,
   syncLabel,
+  lastAck,
   clientCount,
   onOpenSettings
 }: TopStripProps) {
+  const ackDot = syncStatus === "error" ? "err" : syncStatus === "sending" ? "warn" : "ok";
+  const ackText = lastAck === "Waiting for control activity" ? ui.status.waiting : lastAck;
+
   return (
     <header className="top-strip" aria-label="Status bar">
       <div className="flex items-center gap-3">
@@ -54,6 +59,9 @@ export function TopStrip({
       </div>
 
       <div className="flex items-center justify-center gap-4 min-w-0">
+        <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+          {clientCount}/20
+        </span>
         <span className="flex items-center gap-1.5">
           <i className={`dot ${connectionMeta[connection]}`} style={{ width: 7, height: 7 }} />
           <span className="text-[11px] text-muted-foreground font-medium">{ui.status[connection]}</span>
@@ -86,8 +94,12 @@ export function TopStrip({
         >
           {syncLabel}
         </span>
-        <span className="text-[11px] text-muted-foreground tabular-nums opacity-75 font-medium">
-          {clientCount}/20
+        <span className="header-ack" title={lastAck}>
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground shrink-0">
+            {ui.metrics.lastAck}
+          </span>
+          <i className={`dot ${ackDot}`} style={{ width: 7, height: 7 }} />
+          <span className="header-ack-text">{ackText}</span>
         </span>
       </div>
 

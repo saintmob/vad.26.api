@@ -106,6 +106,7 @@ export const performanceSpec = {
             "setFullscreen",
             "setMode",
             "setIntensity",
+            "setTreeStandby",
             "setOperationLock",
             "pulseScreen",
             "setScreen",
@@ -115,6 +116,7 @@ export const performanceSpec = {
             "setScreenAutoRedirect",
             "setScreenMenuVisible",
             "setScreenDebugVisible",
+            "setScreenCameraEnabled",
             "setScreenPresentation",
             "setFireworkState"
           ]

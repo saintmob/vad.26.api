@@ -340,6 +340,7 @@ function inferModule(command: string): ControlCommand["module"] {
     "setMode",
     "setIntensity",
     "resetTree",
+    "setTreeStandby",
     "setVisualMode",
     "setFireworkState",
     "setBaofaFishState",
@@ -635,8 +636,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       };
     }
     if (["setInteractionMode", "setMode"].includes(command.command)) {
-      state.modules.interaction.mode = String(value || command.target) as InteractionModuleState["mode"];
+      const nextMode = String(value || command.target) as InteractionModuleState["mode"];
+      state.modules.interaction.mode = nextMode;
       state.modules.interaction.visualMode = "tree";
+      if (nextMode === "idle") {
+        state.modules.interaction.treeGrowth = Math.max(state.modules.interaction.treeGrowth, 0.12);
+        state.modules.interaction.treePhase = "idle";
+        state.modules.interaction.intensity = 0.08;
+        state.modules.interaction.gestureActive = false;
+      }
     }
     if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value, state.modules.interaction.intensity);
     if (command.command === "resetTree") {
@@ -646,6 +654,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.modules.interaction.mode = "idle";
       state.modules.interaction.visualMode = "tree";
       state.modules.interaction.fireworkState = "standby";
+      state.modules.interaction.baofaFishState = "idle";
       state.modules.interaction.intensity = 0.08;
       state.modules.interaction.evolution = 0;
       state.modules.interaction.lastInteraction = null;
@@ -656,6 +665,17 @@ function applyCommand(state: PerformanceState, command: ControlCommand) {
       state.show.beat = 0;
       state.show.bar = 1;
       state.modules.audio.transport = "stopped";
+    }
+    if (command.command === "setTreeStandby") {
+      state.modules.interaction.treeGrowth = 0;
+      state.modules.interaction.treePhase = "idle";
+      state.modules.interaction.gestureActive = false;
+      state.modules.interaction.mode = "idle";
+      state.modules.interaction.visualMode = "tree";
+      state.modules.interaction.intensity = 0.08;
+      state.modules.interaction.evolution = 0;
+      state.modules.interaction.lastInteraction = null;
+      state.modules.interaction.screenPulse = null;
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as InteractionModuleState["visualMode"];

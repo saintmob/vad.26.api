@@ -22,6 +22,7 @@ interface StageMapProps {
   sequenceGroupCount: number;
   sequenceStep: SequenceStep;
   pendingActions: Set<string>;
+  screenPresentation: PerformanceState["modules"]["interaction"]["screenPresentation"];
   dragBox: DragBox | null;
   ui: UiCopy;
   onScreenSelect: (screenId: string) => void;
@@ -43,6 +44,7 @@ export function StageMap({
   sequenceGroupCount,
   sequenceStep,
   pendingActions,
+  screenPresentation,
   dragBox,
   ui,
   onScreenSelect,
@@ -196,8 +198,35 @@ export function StageMap({
             </Button>
           ))}
         </div>
-        {sequenceGroupCount > 0 && (
-          <div className="flex items-center gap-1 ml-auto">
+        <div className="stage-footer-actions">
+          <div className="stage-presentation" aria-label={ui.interaction.presentation}>
+            <Button
+              size="sm"
+              variant={screenPresentation.showMenu ? "default" : "outline"}
+              className="h-7 text-[10px]"
+              onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
+            >
+              {ui.interaction.showMenu}
+            </Button>
+            <Button
+              size="sm"
+              variant={screenPresentation.showDebug ? "default" : "outline"}
+              className="h-7 text-[10px]"
+              onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
+            >
+              {ui.interaction.showDebug}
+            </Button>
+            <Button
+              size="sm"
+              variant={screenPresentation.cameraEnabled ? "default" : "outline"}
+              className="h-7 text-[10px]"
+              onClick={() => sendControl("interaction", "setScreenCameraEnabled", "screen-camera", !screenPresentation.cameraEnabled)}
+            >
+              {ui.interaction.camera}
+            </Button>
+          </div>
+          {sequenceGroupCount > 0 && (
+            <div className="stage-sequence-controls">
             <span className="text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
               {ui.interaction.step}
             </span>
@@ -221,8 +250,9 @@ export function StageMap({
             >
               <X className="h-3 w-3" /> {ui.actions.clearSequence}
             </Button>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

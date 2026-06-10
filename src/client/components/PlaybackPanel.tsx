@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Play, Pause, Square, RotateCcw, Shuffle } from "lucide-react";
+import { Play, Pause, Square, RotateCcw, Shuffle, Send } from "lucide-react";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import type { ControlCommand } from "../../types";
 import type { UiCopy } from "../data/i18n";
 import { visualScenes, bpmOptions } from "../data/constants";
@@ -11,6 +12,7 @@ interface PlaybackPanelProps {
   showStatus: "standby" | "running" | "paused" | "ended";
   bpm: number;
   currentScene: string;
+  visualText: string;
   locale: string;
   ui: UiCopy;
 }
@@ -23,15 +25,21 @@ export function PlaybackPanel({
   showStatus,
   bpm,
   currentScene,
+  visualText,
   locale,
   ui
 }: PlaybackPanelProps) {
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [textDraft, setTextDraft] = useState(visualText);
   const confirmTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
     if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
   }, []);
+
+  useEffect(() => {
+    setTextDraft(visualText);
+  }, [visualText]);
 
   const handleReset = () => {
     if (!confirmingReset) {
@@ -42,6 +50,10 @@ export function PlaybackPanel({
     if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
     setConfirmingReset(false);
     sendControl("show", "reset", showId);
+  };
+
+  const sendVisualText = () => {
+    sendControl("visual", "setText", "visual-main", textDraft);
   };
 
   const transport = [
@@ -111,6 +123,30 @@ export function PlaybackPanel({
               {s.label}
             </button>
           ))}
+        </div>
+
+        <div className="vj-text-row">
+          <Input
+            value={textDraft}
+            className="h-8 text-[11px]"
+            placeholder={ui.visual.text}
+            onChange={(event) => setTextDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                sendVisualText();
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 px-3 text-[11px] gap-1 shrink-0"
+            onClick={sendVisualText}
+          >
+            <Send className="h-3.5 w-3.5" />
+            {ui.actions.send}
+          </Button>
         </div>
       </div>
     </div>
