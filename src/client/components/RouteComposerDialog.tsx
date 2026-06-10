@@ -60,15 +60,15 @@ export function RouteComposerDialog({
             />
           </div>
 
-          <ScrollArea className="h-[320px] border border-[--border] rounded-[var(--radius)]">
-            <div className="divide-y divide-[--border]">
+          <ScrollArea className="h-[320px] border border-(--border) rounded-[var(--radius)]">
+            <div className="divide-y divide-(--border)">
               {screenLayoutOrder.map((screenId) => {
                 const entry = draft[screenId] || { owner: "baofa" as ScreenOwner, scene: "Video Flow" };
                 const isSelected = selectedScreenId === screenId;
                 return (
                   <div
                     key={screenId}
-                    className={`flex items-center gap-2 px-3 py-1.5 ${isSelected ? "bg-[--secondary]" : ""}`}
+                    className={`flex items-center gap-2 px-3 py-1.5 ${isSelected ? "bg-(--secondary)" : ""}`}
                     onClick={() => onSelectScreen(screenId)}
                   >
                     <span className="w-7 text-[11px] font-bold tabular-nums shrink-0">{screenId}</span>
@@ -77,7 +77,7 @@ export function RouteComposerDialog({
                         <Button
                           key={opt.value}
                           size="sm"
-                          variant={entry.owner === opt.value ? "default" : "outline"}
+                          variant={entry.owner === opt.value ? "stage" : "outline"}
                           className="h-6 px-2 text-[10px]"
                           onClick={() => onOwnerChange(screenId, opt.value)}
                         >

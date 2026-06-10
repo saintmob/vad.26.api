@@ -105,7 +105,7 @@ export function StageMap({
     <div className="module module-stage h-full">
       <div className="module-head">
         <h2 className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[--color-stage]" />
+          <span className="w-2 h-2 rounded-full bg-(--color-stage)" />
           {ui.interaction.screenMap}
         </h2>
         <div className="flex gap-1.5">
@@ -116,7 +116,7 @@ export function StageMap({
                 <TooltipTrigger asChild>
                   <Button
                     size="sm"
-                    variant={screenSelectionMode === mode.id ? "default" : "outline"}
+                    variant={screenSelectionMode === mode.id ? "neutral" : "outline"}
                     className="h-8 w-8 p-0"
                     onClick={() => {
                       onSelectionModeChange(mode.id);
@@ -188,7 +188,7 @@ export function StageMap({
             <Button
               key={opt.value}
               size="sm"
-              variant={sharedOwner === opt.value ? "default" : "outline"}
+              variant={sharedOwner === opt.value ? "stage" : "outline"}
               className="h-7 text-[11px]"
               onClick={() => handleOwnerChange(opt.value)}
             >
@@ -205,7 +205,7 @@ export function StageMap({
               <Button
                 key={step}
                 size="sm"
-                variant={sequenceStep === step ? "default" : "outline"}
+                variant={sequenceStep === step ? "neutral" : "outline"}
                 className="h-6 px-1.5 text-[10px] tabular-nums"
                 onClick={() => onSequenceStepChange(step)}
               >

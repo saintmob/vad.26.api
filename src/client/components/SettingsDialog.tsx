@@ -53,16 +53,16 @@ export function SettingsDialog({
         </DialogHeader>
 
         <div className="space-y-3">
-          <div className="bg-[--secondary] border border-[--border] rounded-[var(--radius)] p-3 space-y-2">
+          <div className="bg-(--secondary) border border-(--border) rounded-[var(--radius)] p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold">{ui.app.theme}</span>
             </div>
-            <div className="flex gap-1 p-0.5 bg-[--background] rounded-[calc(var(--radius)-2px)]">
+            <div className="flex gap-1 p-0.5 bg-(--background) rounded-[calc(var(--radius)-2px)]">
               {themeOptions.map((mode) => (
                 <Button
                   key={mode}
                   size="sm"
-                  variant={themeMode === mode ? "default" : "ghost"}
+                  variant={themeMode === mode ? "neutral" : "ghost"}
                   className="flex-1 h-7 text-[11px]"
                   onClick={() => onThemeChange(mode)}
                 >
@@ -72,16 +72,16 @@ export function SettingsDialog({
             </div>
           </div>
 
-          <div className="bg-[--secondary] border border-[--border] rounded-[var(--radius)] p-3 space-y-2">
+          <div className="bg-(--secondary) border border-(--border) rounded-[var(--radius)] p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold">{ui.app.language}</span>
             </div>
-            <div className="flex gap-1 p-0.5 bg-[--background] rounded-[calc(var(--radius)-2px)]">
+            <div className="flex gap-1 p-0.5 bg-(--background) rounded-[calc(var(--radius)-2px)]">
               {languageOptions.map((mode) => (
                 <Button
                   key={mode}
                   size="sm"
-                  variant={languageMode === mode ? "default" : "ghost"}
+                  variant={languageMode === mode ? "neutral" : "ghost"}
                   className="flex-1 h-7 text-[11px]"
                   onClick={() => onLanguageChange(mode)}
                 >
@@ -91,7 +91,7 @@ export function SettingsDialog({
             </div>
           </div>
 
-          <div className="bg-[--secondary] border border-[--border] rounded-[var(--radius)] p-3 space-y-2">
+          <div className="bg-(--secondary) border border-(--border) rounded-[var(--radius)] p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold">{ui.app.token}</span>
               <span className="text-[9px] text-muted-foreground">
@@ -107,7 +107,7 @@ export function SettingsDialog({
             />
           </div>
 
-          <div className="bg-[--secondary] border border-[--border] rounded-[var(--radius)] p-3 space-y-2">
+          <div className="bg-(--secondary) border border-(--border) rounded-[var(--radius)] p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold">{ui.interaction.presentation}</span>
             </div>

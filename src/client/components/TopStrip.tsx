@@ -43,25 +43,25 @@ export function TopStrip({
 }: TopStripProps) {
   return (
     <header className="top-strip" aria-label="Status bar">
-      <div className="flex items-center gap-2.5">
-        <div className="mark" style={{ width: 28, height: 28, fontSize: 13, borderRadius: 7 }}>
+      <div className="flex items-center gap-3">
+        <div className="mark" style={{ width: 32, height: 32, fontSize: 14, borderRadius: 6 }}>
           V
         </div>
         <div className="flex flex-col leading-tight">
-          <span className="text-[13px] font-bold tracking-tight">{ui.app.title}</span>
-          <span className="text-[9px] text-muted-foreground uppercase tracking-wider">{ui.app.subtitle}</span>
+          <span className="text-[14px] font-bold tracking-tight">{ui.app.title}</span>
+          <span className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">{ui.app.subtitle}</span>
         </div>
       </div>
 
-      <div className="flex items-center justify-center gap-3 min-w-0">
+      <div className="flex items-center justify-center gap-4 min-w-0">
         <span className="flex items-center gap-1.5">
-          <i className={`dot ${connectionMeta[connection]}`} style={{ width: 6, height: 6 }} />
-          <span className="text-[10px] text-muted-foreground">{ui.status[connection]}</span>
+          <i className={`dot ${connectionMeta[connection]}`} style={{ width: 7, height: 7 }} />
+          <span className="text-[11px] text-muted-foreground font-medium">{ui.status[connection]}</span>
         </span>
-        <span className="text-[10px] text-muted-foreground font-mono">{showId}</span>
-        <span className="text-[10px] font-medium text-foreground/80">{showStatusLabel}</span>
+        <span className="text-[11px] text-muted-foreground font-mono font-medium">{showId}</span>
+        <span className="text-[11px] font-medium text-foreground">{showStatusLabel}</span>
 
-        <span className="h-3.5 w-px bg-[--border]" aria-hidden />
+        <span className="h-4 w-px bg-(--border)" aria-hidden />
 
         {modulePorts.map(({ key, port }) => (
           <Tooltip key={key}>
@@ -78,15 +78,15 @@ export function TopStrip({
           </Tooltip>
         ))}
 
-        <span className="h-3.5 w-px bg-[--border]" aria-hidden />
+        <span className="h-4 w-px bg-(--border)" aria-hidden />
 
         <span
-          className={`text-[10px] tabular-nums ${syncStatus === "error" ? "text-[--destructive]" : "text-muted-foreground"}`}
+          className={`text-[11px] tabular-nums font-medium ${syncStatus === "error" ? "text-(--destructive)" : "text-muted-foreground"}`}
           title={syncLabel}
         >
           {syncLabel}
         </span>
-        <span className="text-[10px] text-muted-foreground tabular-nums opacity-70">
+        <span className="text-[11px] text-muted-foreground tabular-nums opacity-75 font-medium">
           {clientCount}/20
         </span>
       </div>

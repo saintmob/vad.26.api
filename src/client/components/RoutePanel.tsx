@@ -48,7 +48,7 @@ export function RoutePanel({
     <div className="module module-route">
       <div className="module-head">
         <h2 className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[--color-route]" />
+          <span className="w-2 h-2 rounded-full bg-(--color-route)" />
           {ui.layout.stage}
         </h2>
         <Button
@@ -69,7 +69,7 @@ export function RoutePanel({
               <Button
                 key={preset.value}
                 size="sm"
-                variant={interaction.screenRoutePreset === preset.value ? "default" : "outline"}
+                variant={interaction.screenRoutePreset === preset.value ? "stage" : "outline"}
                 className="h-9 text-[12px] font-semibold"
                 onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.value)}
               >
@@ -83,7 +83,7 @@ export function RoutePanel({
                 <div key={preset.id} className="flex items-center gap-1 min-w-0">
                   <Button
                     size="sm"
-                    variant={interaction.screenRoutePreset === preset.id ? "default" : "outline"}
+                    variant={interaction.screenRoutePreset === preset.id ? "stage" : "outline"}
                     className="h-8 text-[11px] flex-1 min-w-0 justify-start"
                     title={preset.name}
                     onClick={() => sendControl("interaction", "setScreenRoutePreset", "screen-routes", preset.id)}
@@ -107,38 +107,35 @@ export function RoutePanel({
 
         <section className="control-section">
           <div className="label"><span>{ui.interaction.engine}</span></div>
-          <div className="btn-grid two">
-            <Button
-              size="sm"
-              variant={interaction.visualMode === "tree" ? "default" : "outline"}
-              className="h-8 text-[11px]"
+          <div className="flex items-center gap-1.5 flex-wrap px-1">
+            <button
+              type="button"
+              className={`scene-tag ${interaction.visualMode === "tree" ? "active" : ""}`}
               onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "tree")}
             >
               {ui.interaction.engineTree}
-            </Button>
-            <Button
-              size="sm"
-              variant={interaction.visualMode === "firework" ? "default" : "outline"}
-              className="h-8 text-[11px]"
+            </button>
+            <button
+              type="button"
+              className={`scene-tag ${interaction.visualMode === "firework" ? "active" : ""}`}
               onClick={() => sendControl("interaction", "setVisualMode", "visual-mode", "firework")}
             >
               {ui.interaction.engineFirework}
-            </Button>
+            </button>
           </div>
           <div className="sub-panel">
             {interaction.visualMode === "tree" ? (
               <>
-                <div className="btn-grid four">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {["idle", "flow", "interaction", "climax"].map((mode) => (
-                    <Button
+                    <button
                       key={mode}
-                      size="sm"
-                      variant={interaction.mode === mode ? "default" : "outline"}
-                      className="h-7 text-[11px]"
+                      type="button"
+                      className={`scene-tag ${interaction.mode === mode ? "active" : ""}`}
                       onClick={() => onTriggerMode(mode)}
                     >
                       {modeLabels[mode]}
-                    </Button>
+                    </button>
                   ))}
                 </div>
                 <Button
@@ -151,21 +148,20 @@ export function RoutePanel({
                 </Button>
               </>
             ) : (
-              <div className="btn-grid three">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {([
                   ["standby", fireworkLabels.standby],
                   ["launching", fireworkLabels.launching],
                   ["resetting", fireworkLabels.resetting]
                 ] as const).map(([state, label]) => (
-                  <Button
+                  <button
                     key={state}
-                    size="sm"
-                    variant={fireworkState === state ? "default" : "outline"}
-                    className="h-7 text-[11px]"
+                    type="button"
+                    className={`scene-tag ${fireworkState === state ? "active" : ""}`}
                     onClick={() => sendControl("interaction", "setFireworkState", "firework-state", state)}
                   >
                     {label}
-                  </Button>
+                  </button>
                 ))}
               </div>
             )}
@@ -174,17 +170,16 @@ export function RoutePanel({
 
         <section className="control-section">
           <div className="label"><span>{ui.interaction.fish}</span></div>
-          <div className="btn-grid three">
+          <div className="flex items-center gap-1.5 flex-wrap px-1">
             {fishStates.map(({ value, label }) => (
-              <Button
+              <button
                 key={value}
-                size="sm"
-                variant={baofaFishState === value ? "default" : "outline"}
-                className="h-8 text-[11px]"
+                type="button"
+                className={`scene-tag ${baofaFishState === value ? "active" : ""}`}
                 onClick={() => sendControl("interaction", "setBaofaFishState", "baofa-fish", value)}
               >
                 {label}
-              </Button>
+              </button>
             ))}
           </div>
         </section>
@@ -193,15 +188,7 @@ export function RoutePanel({
 
         <section className="control-section">
           <div className="label"><span>{ui.interaction.presentation}</span></div>
-          <div className="btn-grid four">
-            <Button
-              size="sm"
-              variant={screenPresentation.autoRedirect ? "default" : "outline"}
-              className="h-7 text-[10px]"
-              onClick={() => sendControl("interaction", "setScreenAutoRedirect", "screen-routing", !screenPresentation.autoRedirect)}
-            >
-              {ui.interaction.autoRedirect}
-            </Button>
+          <div className="btn-grid three">
             <Button
               size="sm"
               variant={screenPresentation.showMenu ? "default" : "outline"}

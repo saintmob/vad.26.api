@@ -355,11 +355,6 @@ function App() {
           e.preventDefault();
           if (snapshot) sendControl("show", "stop", snapshot.show.id);
           break;
-        case "r":
-        case "R":
-          e.preventDefault();
-          if (snapshot) sendControl("show", "reset", snapshot.show.id);
-          break;
         case "1":
           setScreenSelectionMode("solid");
           break;

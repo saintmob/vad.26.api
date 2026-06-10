@@ -49,10 +49,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             className={cn(
               "pointer-events-auto rounded-lg border px-4 py-3 shadow-lg backdrop-blur-sm transition-all duration-300",
               t.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2",
-              t.variant === "success" && "bg-[--color-online]/10 border-[--color-online]/30 text-[--color-online]",
-              t.variant === "error" && "bg-[--destructive]/10 border-[--destructive]/30 text-[--destructive]",
-              t.variant === "warning" && "bg-[--color-cue]/10 border-[--color-cue]/30 text-[--color-cue]",
-              t.variant === "default" && "bg-[--card] border-[--border] text-[--foreground]"
+              t.variant === "success" && "bg-(--color-online)/10 border-(--color-online)/30 text-(--color-online)",
+              t.variant === "error" && "bg-(--destructive)/10 border-(--destructive)/30 text-(--destructive)",
+              t.variant === "warning" && "bg-(--color-cue)/10 border-(--color-cue)/30 text-(--color-cue)",
+              t.variant === "default" && "bg-(--card) border-(--border) text-(--foreground)"
             )}
           >
             {t.title && <div className="text-xs font-semibold">{t.title}</div>}
