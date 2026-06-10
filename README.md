@@ -182,6 +182,7 @@ WebSocket 主要消息：
 - `setMode`
 - `setIntensity`
 - `resetTree`
+- `setTreeStandby`
 - `setVisualMode`
 - `setScreen`
 - `pulseScreen`

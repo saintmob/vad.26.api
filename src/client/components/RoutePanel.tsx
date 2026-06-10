@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { Plus, RotateCcw, X } from "lucide-react";
 import { Button } from "./ui/button";
-import { Separator } from "./ui/separator";
 import type { PerformanceState, ControlCommand } from "../../types";
 import type { UiCopy } from "../data/i18n";
 import { screenRoutePresets } from "../data/constants";
 
-type EngineTab = "tree" | "firework" | "fish";
+type EngineTab = "tree" | "firework";
 
 interface RoutePanelProps {
   interaction: PerformanceState["modules"]["interaction"];
-  screenPresentation: PerformanceState["modules"]["interaction"]["screenPresentation"];
   fireworkState: string;
   baofaFishState: string;
   modeLabels: Record<string, string>;
@@ -25,7 +23,6 @@ interface RoutePanelProps {
 
 export function RoutePanel({
   interaction,
-  screenPresentation,
   fireworkState,
   baofaFishState,
   modeLabels,
@@ -54,17 +51,16 @@ export function RoutePanel({
 
   const handleEngineTabChange = (tab: EngineTab) => {
     setActiveEngineTab(tab);
-    if (tab !== "fish") {
-      sendControl("interaction", "setVisualMode", "visual-mode", tab);
-    }
+    sendControl("interaction", "setVisualMode", "visual-mode", tab);
   };
 
   const resetEngines = () => {
     onClearSequence();
     setActiveEngineTab("tree");
     sendControl("interaction", "resetTree", "engine-reset", true);
-    sendControl("interaction", "setBaofaFishState", "baofa-fish", "idle");
   };
+
+  const treeIsStandby = interaction.mode === "idle" && interaction.treePhase === "idle" && interaction.treeGrowth <= 0;
 
   return (
     <div className="module module-route">
@@ -140,72 +136,77 @@ export function RoutePanel({
               {ui.actions.reset}
             </Button>
           </div>
-          <div className="sub-panel engine-panel">
-            <div className="engine-tabs" role="tablist" aria-label={ui.interaction.engine}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeEngineTab === "tree"}
-                className={`engine-tab ${activeEngineTab === "tree" ? "active" : ""}`}
-                onClick={() => handleEngineTabChange("tree")}
-              >
-                {ui.interaction.engineTree}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeEngineTab === "firework"}
-                className={`engine-tab ${activeEngineTab === "firework" ? "active" : ""}`}
-                onClick={() => handleEngineTabChange("firework")}
-              >
-                {ui.interaction.engineFirework}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeEngineTab === "fish"}
-                className={`engine-tab ${activeEngineTab === "fish" ? "active" : ""}`}
-                onClick={() => handleEngineTabChange("fish")}
-              >
-                {ui.interaction.fish}
-              </button>
+          <div className="engine-layout">
+            <div className="sub-panel engine-panel">
+              <div className="engine-tabs" role="tablist" aria-label={ui.interaction.engine}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeEngineTab === "tree"}
+                  className={`engine-tab ${activeEngineTab === "tree" ? "active" : ""}`}
+                  onClick={() => handleEngineTabChange("tree")}
+                >
+                  {ui.interaction.engineTree}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeEngineTab === "firework"}
+                  className={`engine-tab ${activeEngineTab === "firework" ? "active" : ""}`}
+                  onClick={() => handleEngineTabChange("firework")}
+                >
+                  {ui.interaction.engineFirework}
+                </button>
+              </div>
+
+              <div className="engine-content" role="tabpanel">
+                {activeEngineTab === "tree" && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      className={`scene-tag ${treeIsStandby ? "active" : ""}`}
+                      onClick={() => sendControl("interaction", "setTreeStandby", "tree-standby", true)}
+                    >
+                      {fireworkLabels.standby}
+                    </button>
+                    {["idle", "flow", "interaction", "climax"].map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={`scene-tag ${interaction.mode === mode && !(mode === "idle" && treeIsStandby) ? "active" : ""}`}
+                        onClick={() => onTriggerMode(mode)}
+                      >
+                        {modeLabels[mode]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {activeEngineTab === "firework" && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {([
+                      ["standby", fireworkLabels.standby],
+                      ["launching", fireworkLabels.launching]
+                    ] as const).map(([state, label]) => (
+                      <button
+                        key={state}
+                        type="button"
+                        className={`scene-tag ${fireworkState === state ? "active" : ""}`}
+                        onClick={() => sendControl("interaction", "setFireworkState", "firework-state", state)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="engine-content" role="tabpanel">
-              {activeEngineTab === "tree" && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {["idle", "flow", "interaction", "climax"].map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`scene-tag ${interaction.mode === mode ? "active" : ""}`}
-                      onClick={() => onTriggerMode(mode)}
-                    >
-                      {modeLabels[mode]}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {activeEngineTab === "firework" && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {([
-                    ["standby", fireworkLabels.standby],
-                    ["launching", fireworkLabels.launching]
-                  ] as const).map(([state, label]) => (
-                    <button
-                      key={state}
-                      type="button"
-                      className={`scene-tag ${fireworkState === state ? "active" : ""}`}
-                      onClick={() => sendControl("interaction", "setFireworkState", "firework-state", state)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {activeEngineTab === "fish" && (
+            <div className="sub-panel fish-panel">
+              <div className="engine-tabs" aria-label={ui.interaction.fish}>
+                <span className="engine-tab active is-static">{ui.interaction.fish}</span>
+              </div>
+              <div className="engine-content">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {fishStates.map(({ value, label }) => (
                     <button
@@ -218,42 +219,11 @@ export function RoutePanel({
                     </button>
                   ))}
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </section>
 
-        <Separator className="my-0.5" />
-
-        <section className="control-section">
-          <div className="label"><span>{ui.interaction.presentation}</span></div>
-          <div className="btn-grid three">
-            <Button
-              size="sm"
-              variant={screenPresentation.showMenu ? "default" : "outline"}
-              className="h-7 text-[10px]"
-              onClick={() => sendControl("interaction", "setScreenMenuVisible", "screen-menu", !screenPresentation.showMenu)}
-            >
-              {ui.interaction.showMenu}
-            </Button>
-            <Button
-              size="sm"
-              variant={screenPresentation.showDebug ? "default" : "outline"}
-              className="h-7 text-[10px]"
-              onClick={() => sendControl("interaction", "setScreenDebugVisible", "screen-debug", !screenPresentation.showDebug)}
-            >
-              {ui.interaction.showDebug}
-            </Button>
-            <Button
-              size="sm"
-              variant={screenPresentation.cameraEnabled ? "default" : "outline"}
-              className="h-7 text-[10px]"
-              onClick={() => sendControl("interaction", "setScreenCameraEnabled", "screen-camera", !screenPresentation.cameraEnabled)}
-            >
-              {ui.interaction.camera}
-            </Button>
-          </div>
-        </section>
       </div>
     </div>
   );

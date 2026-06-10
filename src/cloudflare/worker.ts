@@ -864,8 +864,15 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       };
     }
     if (["setInteractionMode", "setMode"].includes(command.command)) {
-      state.modules.interaction.mode = String(value || command.target) as PerformanceState["modules"]["interaction"]["mode"];
+      const nextMode = String(value || command.target) as PerformanceState["modules"]["interaction"]["mode"];
+      state.modules.interaction.mode = nextMode;
       state.modules.interaction.visualMode = "tree";
+      if (nextMode === "idle") {
+        state.modules.interaction.treeGrowth = Math.max(state.modules.interaction.treeGrowth, 0.12);
+        state.modules.interaction.treePhase = "idle";
+        state.modules.interaction.intensity = 0.08;
+        state.modules.interaction.gestureActive = false;
+      }
     }
     if (command.command === "setIntensity") state.modules.interaction.intensity = clampUnit(value, state.modules.interaction.intensity);
     if (command.command === "resetTree") {
@@ -875,6 +882,7 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       state.modules.interaction.mode = "idle";
       state.modules.interaction.visualMode = "tree";
       state.modules.interaction.fireworkState = "standby";
+      state.modules.interaction.baofaFishState = "idle";
       state.modules.interaction.intensity = 0.08;
       state.modules.interaction.evolution = 0;
       state.modules.interaction.lastInteraction = null;
@@ -885,6 +893,17 @@ function applyCommand(state: PerformanceState, command: ControlCommand, env: Env
       state.show.beat = 0;
       state.show.bar = 1;
       state.modules.audio.transport = "stopped";
+    }
+    if (command.command === "setTreeStandby") {
+      state.modules.interaction.treeGrowth = 0;
+      state.modules.interaction.treePhase = "idle";
+      state.modules.interaction.gestureActive = false;
+      state.modules.interaction.mode = "idle";
+      state.modules.interaction.visualMode = "tree";
+      state.modules.interaction.intensity = 0.08;
+      state.modules.interaction.evolution = 0;
+      state.modules.interaction.lastInteraction = null;
+      state.modules.interaction.screenPulse = null;
     }
     if (command.command === "setVisualMode" && ["tree", "firework"].includes(String(value))) {
       state.modules.interaction.visualMode = String(value) as PerformanceState["modules"]["interaction"]["visualMode"];
@@ -969,7 +988,7 @@ function buildControlPatchMessages(command: ControlCommand, state: PerformanceSt
     let patch: JsonRecord;
     if (["setInteractionMode", "setMode"].includes(command.command)) patch = { mode: interaction.mode, visualMode: interaction.visualMode };
     else if (command.command === "setIntensity") patch = { intensity: interaction.intensity };
-    else if (command.command === "resetTree") {
+    else if (["resetTree", "setTreeStandby"].includes(command.command)) {
       patch = { mode: interaction.mode, intensity: interaction.intensity, evolution: interaction.evolution, treeGrowth: interaction.treeGrowth, treePhase: interaction.treePhase, gestureActive: interaction.gestureActive, visualMode: interaction.visualMode, fireworkState: interaction.fireworkState, baofaFishState: interaction.baofaFishState, lastInteraction: interaction.lastInteraction, screenPulse: interaction.screenPulse };
     } else if (command.command === "setVisualMode") patch = { visualMode: interaction.visualMode, mode: interaction.mode, baofaFishState: interaction.baofaFishState };
     else if (command.command === "setFireworkState") patch = { fireworkState: interaction.fireworkState, visualMode: interaction.visualMode };
@@ -1124,7 +1143,7 @@ function normalizeControlCommand(input: unknown): ControlCommand {
 function inferModule(command: string): ControlCommand["module"] {
   if (["setMute", "setGain", "setMasterLevel", "setPreset", "setStyle", "shuffleStyle", "setActiveTab"].includes(command)) return "audio";
   if (["setScene", "setText", "setAudioDrive", "setFullscreen", "setColors", "setFx"].includes(command)) return "visual";
-  if (["setMode", "setIntensity", "resetTree", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "saveScreenRouteArrangement", "deleteScreenRouteArrangement", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation", "setOperationLock"].includes(command)) return "interaction";
+  if (["setMode", "setIntensity", "resetTree", "setTreeStandby", "setVisualMode", "setFireworkState", "setBaofaFishState", "pulseScreen", "setScreen", "setScreenOwner", "setScreenRoutePreset", "saveScreenRouteArrangement", "deleteScreenRouteArrangement", "setScreenAutoRedirect", "setScreenDebugVisible", "setScreenMenuVisible", "setScreenCameraEnabled", "setScreenPresentation", "setOperationLock"].includes(command)) return "interaction";
   if (["play", "pause", "stop", "reset", "setBpm", "seek"].includes(command)) return "show";
   if (command === "focusVideo") return "video";
   if (command === "setGuestOnStage") return "guest";

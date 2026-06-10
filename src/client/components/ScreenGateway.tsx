@@ -20,7 +20,7 @@ export const ScreenGateway = memo(function ScreenGateway({ screenId }: ScreenGat
     showDebug: false,
     showMenu: false
   };
-  const routeTargetUrl = localizeScreenRouteTarget(route?.url || null, route?.owner);
+  const routeTargetUrl = localizeScreenRouteTarget(route?.url || null, route?.owner, screenPresentation, screenId);
 
   useEffect(() => {
     let closed = false;

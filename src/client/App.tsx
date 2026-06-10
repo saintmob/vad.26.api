@@ -435,6 +435,7 @@ function App() {
           moduleOnline={moduleOnline}
           syncStatus={effectiveSyncStatus}
           syncLabel={syncLabel}
+          lastAck={lastAck}
           clientCount={clientCount}
           onOpenSettings={() => setSettingsOpen(true)}
         />
@@ -450,6 +451,7 @@ function App() {
             sequenceGroupCount={sequenceGroups.length}
             sequenceStep={sequenceStep}
             pendingActions={pendingActions}
+            screenPresentation={screenPresentation}
             dragBox={dragBox}
             ui={ui}
             onScreenSelect={handleScreenSelect}
@@ -468,12 +470,12 @@ function App() {
               showStatus={show.status}
               bpm={snapshot.modules.audio.bpm}
               currentScene={snapshot.modules.visual.scene}
+              visualText={snapshot.modules.visual.text?.value || ""}
               locale={locale}
               ui={ui}
             />
             <RoutePanel
               interaction={snapshot.modules.interaction}
-              screenPresentation={screenPresentation}
               fireworkState={fireworkState}
               baofaFishState={baofaFishState}
               modeLabels={ui.interactionModes}
@@ -489,10 +491,7 @@ function App() {
         </section>
 
         <StatusBar
-          lastAck={lastAck}
-          syncStatus={effectiveSyncStatus}
           locale={locale}
-          ui={ui}
         />
       </main>
 
