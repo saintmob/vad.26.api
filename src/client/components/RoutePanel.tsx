@@ -133,7 +133,7 @@ export function RoutePanel({
             <Button
               size="sm"
               variant="outline"
-              className="h-6 px-2 text-[10px] gap-1 text-(--destructive) border-(--destructive)/40 hover:bg-(--destructive)/10"
+              className="h-6 px-2 text-[10px] gap-1"
               onClick={resetEngines}
             >
               <RotateCcw className="h-3 w-3" />
@@ -191,8 +191,7 @@ export function RoutePanel({
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {([
                     ["standby", fireworkLabels.standby],
-                    ["launching", fireworkLabels.launching],
-                    ["resetting", fireworkLabels.resetting]
+                    ["launching", fireworkLabels.launching]
                   ] as const).map(([state, label]) => (
                     <button
                       key={state}

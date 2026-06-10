@@ -29,7 +29,7 @@ import {
   screenLayoutOrder
 } from "./data/screenLayout";
 import {
-  normalizeScreenOccupancyId, isLiveClient, makeActionKey,
+  normalizeScreenOccupancyId, inferScreenOccupancyId, isLiveClient, makeActionKey,
   stepDurationMs, wait, resolveBrowserLanguage,
   getScreenIdFromPath
 } from "./lib/helpers";
@@ -390,8 +390,7 @@ function App() {
   const liveDeviceClients = liveClients.filter((c) => c.module !== "dashboard");
   const routeClientsByScreenId = new Map<string, PerformanceState["clients"][string][]>();
   for (const c of liveDeviceClients) {
-    if (!c.screenId) continue;
-    const sid = normalizeScreenOccupancyId(c.screenId);
+    const sid = normalizeScreenOccupancyId(c.screenId) || inferScreenOccupancyId(c.id);
     if (!sid) continue;
     const cur = routeClientsByScreenId.get(sid) || [];
     cur.push(c);

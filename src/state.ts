@@ -79,6 +79,17 @@ function normalizeScreenOccupancyId(value: unknown) {
   return screenId === "MASTER" ? "A1" : screenId;
 }
 
+function inferScreenIdFromClientId(value: unknown) {
+  const text = String(value || "").toUpperCase();
+  if (!text) return "";
+  for (const screenId of SCREEN_IDS) {
+    const escaped = screenId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^A-Z0-9])${escaped}($|[^A-Z0-9])`).test(text)) return screenId;
+  }
+  if (/(^|[^A-Z0-9])MASTER($|[^A-Z0-9])/.test(text)) return "A1";
+  return "";
+}
+
 export function isModuleName(value: unknown): value is ModuleName {
   return typeof value === "string" && MODULE_NAMES.includes(value as ModuleName);
 }
@@ -487,7 +498,9 @@ export class ShowStateStore {
       lastSeen: now,
       latency: null,
       capabilities: Array.isArray(message.capabilities) ? message.capabilities.map(String) : [],
-      screenId: normalizeScreenOccupancyId(this.state.clients[message.clientId || fallbackId]?.screenId),
+      screenId: normalizeScreenOccupancyId(message.screenId)
+        || normalizeScreenOccupancyId(this.state.clients[message.clientId || fallbackId]?.screenId)
+        || inferScreenIdFromClientId(message.clientId || fallbackId),
       overview: this.state.clients[message.clientId || fallbackId]?.overview
     };
     this.state.clients[client.id] = client;

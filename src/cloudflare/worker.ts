@@ -67,6 +67,23 @@ const SCREEN_TOPOLOGY = [
   ["L2", "F1", "R2"]
 ];
 
+function normalizeScreenOccupancyId(value: unknown) {
+  const screenId = String(value || "").trim();
+  if (!screenId) return "";
+  return screenId === "MASTER" ? "A1" : screenId;
+}
+
+function inferScreenIdFromClientId(value: unknown) {
+  const text = String(value || "").toUpperCase();
+  if (!text) return "";
+  for (const screenId of SCREEN_IDS) {
+    const escaped = screenId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^A-Z0-9])${escaped}($|[^A-Z0-9])`).test(text)) return screenId;
+  }
+  if (/(^|[^A-Z0-9])MASTER($|[^A-Z0-9])/.test(text)) return "A1";
+  return "";
+}
+
 const VJ_SCREEN_IDS = new Set<string>(["A1"]);
 const HOSTED_VJ_SCREEN_ORIGIN = "https://doit-pearl.vercel.app";
 const HOSTED_BAOFA_SCREEN_ORIGIN = "https://baofa.vercel.app";
@@ -411,7 +428,9 @@ export class ShowRoomDurableObject {
       lastSeen: now,
       latency: null,
       capabilities: Array.isArray(message.capabilities) ? message.capabilities.map(String) : [],
-      screenId: state.clients[id]?.screenId,
+      screenId: normalizeScreenOccupancyId(message.screenId)
+        || normalizeScreenOccupancyId(state.clients[id]?.screenId)
+        || inferScreenIdFromClientId(id),
       overview: state.clients[id]?.overview
     };
     state.clients[id] = client;

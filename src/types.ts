@@ -255,6 +255,7 @@ export interface ClientHelloMessage {
   clientId?: string;
   module?: string;
   role?: string;
+  screenId?: string;
   capabilities?: string[];
   token?: string;
 }

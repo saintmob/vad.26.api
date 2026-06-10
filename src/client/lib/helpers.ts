@@ -5,6 +5,24 @@ export function normalizeScreenOccupancyId(value: string | null | undefined): st
   return value === "MASTER" ? "A1" : value;
 }
 
+const screenOccupancyIds = [
+  "A1",
+  "B1", "B2", "B3", "B4", "B5", "B6",
+  "C1", "C2", "C3", "C4",
+  "D1", "D2", "D3",
+  "E1", "F1",
+  "L1", "L2", "R1", "R2"
+] as const;
+
+export function inferScreenOccupancyId(value: string | null | undefined): string {
+  const text = String(value || "").toUpperCase();
+  if (!text) return "";
+  for (const screenId of screenOccupancyIds) {
+    if (new RegExp(`(^|[^A-Z0-9])${screenId}($|[^A-Z0-9])`).test(text)) return screenId;
+  }
+  return /(^|[^A-Z0-9])MASTER($|[^A-Z0-9])/.test(text) ? "A1" : "";
+}
+
 export function isLiveClient(client: { status: string; lastSeen?: number; connectedAt?: number }, now: number, staleMs: number): boolean {
   if (client.status !== "online") return false;
   const lastSeen = Number(client.lastSeen || client.connectedAt || 0);

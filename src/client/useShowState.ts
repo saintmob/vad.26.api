@@ -121,7 +121,8 @@ export function useWebSocket(
   clientId: string,
   capabilities: string[],
   onMessage: (message: ServerMessage) => void,
-  onConnectionChange: (status: ConnectionState) => void
+  onConnectionChange: (status: ConnectionState) => void,
+  screenId?: string
 ) {
   useEffect(() => {
     let closed = false;
@@ -140,6 +141,7 @@ export function useWebSocket(
           clientId,
           module: "dashboard",
           role: "control-room",
+          ...(screenId ? { screenId } : {}),
           capabilities
         }));
         heartbeatTimer = setInterval(() => {
@@ -173,7 +175,7 @@ export function useWebSocket(
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       socket?.close();
     };
-  }, [clientId, capabilities]);
+  }, [clientId, capabilities, screenId]);
 }
 
 export function fetchInitialState() {

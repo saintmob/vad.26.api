@@ -1357,8 +1357,12 @@ test("websocket filters sync traffic by client role and avoids control snapshots
         clientId: "screen-gateway-A1",
         module: "dashboard",
         role: "screen-gateway",
+        screenId: "A1",
         capabilities: ["state.read", "screen.route"]
       }));
+      const screenPresence = await waitForMessage(dashboard, (message) =>
+        message.type === "client.presence" && message.client?.id === "screen-gateway-A1", 2000);
+      assert.equal(screenPresence.client.screenId, "A1");
       await waitForMessage(screenGateway, (message) => message.type === "state.snapshot", 2000);
 
       const ackPromise = waitForMessage(dashboard, (message) => message.type === "control.ack", 2000);

@@ -42,7 +42,8 @@ export const ScreenGateway = memo(function ScreenGateway({ screenId }: ScreenGat
         setSnapshot((current) => current ? applyShowPatch(current, message) : current);
       }
     },
-    setConnection
+    setConnection,
+    screenId
   );
 
   useEffect(() => {
