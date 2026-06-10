@@ -14,7 +14,9 @@ coverage/
 .wrangler/
 
 # Runtime state and local logs
-data/
+/data/
+!src/client/data/
+!src/client/data/**
 tasks/
 *.log
 npm-debug.log*
